@@ -338,11 +338,46 @@ func TestSandboxCreationRateLimit(t *testing.T) {
 	// Without a cookie jar, every request asks for a new sandbox.
 	c.http.Jar = nil
 	for range 5 {
-		c.do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, nil)
+		var sb struct{ Kind string }
+		c.do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, &sb)
+		if sb.Kind != store.KindVisitor {
+			t.Fatalf("within the budget got a %s sandbox", sb.Kind)
+		}
 	}
-	c.do(http.MethodGet, "/api/sandbox", nil).wantError(t, http.StatusTooManyRequests, api.CodeRateLimited)
-	// The forged first X-Forwarded-For hop doesn't buy a new budget, and
-	// another client is unaffected.
+	// Over the budget: the shared read-only showcase, without a cookie.
+	var show struct {
+		ID       uuid.UUID
+		Kind     string
+		ReadOnly bool `json:"read_only"`
+	}
+	r := c.do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, &show)
+	if show.Kind != store.KindShowcase || !show.ReadOnly || r.header.Get("Set-Cookie") != "" {
+		t.Fatalf("over budget: %+v, Set-Cookie %q", show, r.header.Get("Set-Cookie"))
+	}
+	var ov struct{ Customers int }
+	c.do(http.MethodGet, "/api/overview", nil).want(t, http.StatusOK, &ov)
+	if ov.Customers != len(testCustomers) {
+		t.Fatalf("showcase is not seeded: %+v", ov)
+	}
+	c.do(http.MethodPost, "/api/sandbox/advance", map[string]int{"ticks": 1}).
+		wantError(t, http.StatusForbidden, api.CodeReadOnly)
+	c.do(http.MethodPost, "/api/recon/runs", nil).wantError(t, http.StatusForbidden, api.CodeReadOnly)
+	// Every limited visitor shares the one showcase.
+	again := c.do(http.MethodGet, "/api/sandbox", nil)
+	var second struct{ ID uuid.UUID }
+	again.want(t, http.StatusOK, &second)
+	if second.ID != show.ID {
+		t.Fatalf("second showcase %s != %s", second.ID, show.ID)
+	}
+	// A cookie naming the showcase is treated as forged.
+	other := newClient(t)
+	var got sandboxInfo
+	other.do(http.MethodGet, "/api/sandbox", nil, "Cookie: "+api.SandboxCookie+"="+show.ID.String()).
+		want(t, http.StatusOK, &got)
+	if got.ID == show.ID {
+		t.Fatal("a forged cookie reached the showcase with write access")
+	}
+	// Another client is unaffected.
 	newClient(t).do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, nil)
 }
 

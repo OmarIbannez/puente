@@ -60,7 +60,10 @@ func (s *server) sandbox(r *http.Request) (store.Sandbox, error) {
 }
 
 type sandboxResponse struct {
-	ID       uuid.UUID       `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// Kind is visitor, or showcase for the shared read-only fallback.
+	Kind     string          `json:"kind"`
+	ReadOnly bool            `json:"read_only"`
 	Faults   store.Faults    `json:"faults"`
 	Networks []chain.Network `json:"networks"`
 	// Rates and FeeBps quote payouts.
@@ -74,7 +77,7 @@ func (s *server) sandboxInfo(sb store.Sandbox) sandboxResponse {
 	for asset, rate := range cfg.Rates {
 		rates[asset] = rate.String()
 	}
-	return sandboxResponse{ID: sb.ID, Faults: sb.Faults, Networks: s.engine.Networks(sb), Rates: rates, FeeBps: cfg.FeeBps}
+	return sandboxResponse{ID: sb.ID, Kind: sb.Kind, ReadOnly: sb.Kind != store.KindVisitor, Faults: sb.Faults, Networks: s.engine.Networks(sb), Rates: rates, FeeBps: cfg.FeeBps}
 }
 
 func (s *server) getSandbox(w http.ResponseWriter, r *http.Request) {

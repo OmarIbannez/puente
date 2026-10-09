@@ -99,52 +99,90 @@ func (t *touchThrottle) forget(id uuid.UUID) {
 // is served only after its sandbox is fully seeded.
 func (s *server) withSandbox(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := s.resolveSandbox(w, r)
+		id, readOnly, err := s.resolveSandbox(w, r)
 		if err != nil {
 			s.writeError(w, r, err)
+			return
+		}
+		if readOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			s.writeError(w, r, errorf(http.StatusForbidden, CodeReadOnly,
+				"the demo is busy, so you are browsing a shared read-only sandbox; reload in a few minutes for your own"))
 			return
 		}
 		next(w, r.WithContext(withSandboxID(r.Context(), id)))
 	}
 }
 
-func (s *server) resolveSandbox(w http.ResponseWriter, r *http.Request) (uuid.UUID, error) {
+// resolveSandbox returns the visitor's sandbox from the cookie, or creates
+// and seeds a new one. When creation is rate-limited, it falls back to the
+// shared showcase sandbox, read-only and without setting a cookie, so the
+// visitor gets their own sandbox once the budget refills.
+func (s *server) resolveSandbox(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool, error) {
 	if c, err := r.Cookie(SandboxCookie); err == nil {
 		if id, err := uuid.Parse(c.Value); err == nil {
 			if s.touches.fresh(id) {
-				return id, nil
+				return id, false, nil
 			}
 			sb, err := store.TouchSandbox(r.Context(), s.pool, id)
 			switch {
 			case err == nil && sb.Kind != store.KindVisitor:
-				// A cookie naming the live sandbox is forged; never let a
+				// A cookie naming a shared sandbox is forged; never let a
 				// visitor act on it. Fall through to a fresh sandbox.
 			case err == nil:
 				s.touches.mark(id)
 				s.setSandboxCookie(w, id) // slide the expiry
-				return id, nil
+				return id, false, nil
 			case !errors.Is(err, store.ErrNotFound):
-				return uuid.Nil, fmt.Errorf("api: touch sandbox: %w", err)
+				return uuid.Nil, false, fmt.Errorf("api: touch sandbox: %w", err)
 			}
 		}
 	}
 	id, err := s.newSandbox(r)
+	var apiErr *httpError
+	if errors.As(err, &apiErr) && apiErr.Code == CodeRateLimited {
+		sb, err := s.showcase(r.Context())
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		return sb.ID, true, nil
+	}
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, false, err
 	}
 	s.setSandboxCookie(w, id)
-	return id, nil
+	return id, false, nil
 }
 
-// newSandbox creates a sandbox and, in demo mode, seeds it. A sandbox whose
-// seeding fails is deleted.
+// showcase returns the shared read-only sandbox, creating and seeding it on
+// first use.
+func (s *server) showcase(ctx context.Context) (store.Sandbox, error) {
+	s.showcaseMu.Lock()
+	defer s.showcaseMu.Unlock()
+	sb, err := store.ShowcaseSandbox(ctx, s.pool)
+	if !errors.Is(err, store.ErrNotFound) {
+		return sb, err
+	}
+	id, err := s.createSandbox(ctx)
+	if err != nil {
+		return store.Sandbox{}, err
+	}
+	return store.PromoteShowcase(ctx, s.pool, id)
+}
+
 // Creation is rate-limited per client IP (see createLimiter): a client
 // over its budget gets 429 instead of another seeded world.
 func (s *server) newSandbox(r *http.Request) (uuid.UUID, error) {
 	if err := s.allowCreate(r); err != nil {
 		return uuid.Nil, err
 	}
-	return s.createSandbox(r.Context())
+	id, err := s.createSandbox(r.Context())
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// Only visitor sandboxes may enter the touch cache: a cached id skips
+	// the kind check in resolveSandbox.
+	s.touches.mark(id)
+	return id, nil
 }
 
 // allowCreate spends one sandbox creation from the client's budget, or
@@ -174,7 +212,6 @@ func (s *server) createSandbox(parent context.Context) (uuid.UUID, error) {
 			return uuid.Nil, fmt.Errorf("api: seed sandbox: %w", err)
 		}
 	}
-	s.touches.mark(sb.ID)
 	s.log.InfoContext(ctx, "sandbox created", "sandbox", sb.ID.String(), "seeded", s.seed != nil)
 	return sb.ID, nil
 }

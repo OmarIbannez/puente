@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OmarIbannez/puente/internal/engine"
@@ -58,7 +59,9 @@ type server struct {
 	touches *touchThrottle
 	creates *createLimiter
 	proxied bool
-	mux     *http.ServeMux
+	// showcaseMu serializes creating the showcase sandbox.
+	showcaseMu sync.Mutex
+	mux        *http.ServeMux
 }
 
 // New returns the HTTP handler for the API and the SPA.

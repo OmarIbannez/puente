@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Sandbox kinds.
@@ -17,6 +18,9 @@ const (
 	KindVisitor = "visitor"
 	// KindLive is the single sandbox fed by the real testnets.
 	KindLive = "live"
+	// KindShowcase is the single seeded, read-only sandbox new visitors get
+	// while sandbox creation is rate-limited.
+	KindShowcase = "showcase"
 )
 
 // Faults are the fault-injection switches of a sandbox. Each one makes the
@@ -82,6 +86,31 @@ func LiveSandbox(ctx context.Context, q Querier) (Sandbox, error) {
 	if errors.Is(err, ErrNotFound) {
 		return scanSandbox(q.QueryRow(ctx,
 			"SELECT "+sandboxColumns+" FROM sandboxes WHERE kind = 'live'"))
+	}
+	return s, err
+}
+
+// ShowcaseSandbox returns the showcase sandbox, or ErrNotFound.
+func ShowcaseSandbox(ctx context.Context, q Querier) (Sandbox, error) {
+	return scanSandbox(q.QueryRow(ctx,
+		"SELECT "+sandboxColumns+" FROM sandboxes WHERE kind = 'showcase'"))
+}
+
+// PromoteShowcase turns the visitor sandbox id (already seeded) into the
+// showcase. If another showcase won a race, id is deleted and the existing
+// showcase is returned.
+func PromoteShowcase(ctx context.Context, q Querier, id uuid.UUID) (Sandbox, error) {
+	s, err := scanSandbox(q.QueryRow(ctx,
+		`UPDATE sandboxes SET kind = 'showcase'
+		 WHERE id = $1 AND kind = 'visitor'
+		   AND NOT EXISTS (SELECT 1 FROM sandboxes WHERE kind = 'showcase')
+		 RETURNING `+sandboxColumns, id))
+	var pgErr *pgconn.PgError
+	if errors.Is(err, ErrNotFound) || (errors.As(err, &pgErr) && pgErr.Code == "23505") {
+		if err := DeleteSandbox(ctx, q, id); err != nil && !errors.Is(err, ErrNotFound) {
+			return Sandbox{}, err
+		}
+		return ShowcaseSandbox(ctx, q)
 	}
 	return s, err
 }

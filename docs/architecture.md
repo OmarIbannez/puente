@@ -249,7 +249,12 @@ with zero breaks.
     `(id, sandbox_id)` foreign keys, so a row can't point into another sandbox.
   - A forged cookie naming the live sandbox is ignored (`TestSandboxCookie`).
   - Creating a sandbox seeds a whole world, so it is rate-limited per client IP (a burst of
-    5, then one a minute) and globally (600 an hour). Over the limit the answer is 429. Behind
+    5, then one a minute) and globally (600 an hour). Over the limit, a new visitor isn't refused. They browse a shared,
+    seeded **showcase** sandbox: read-only (403 `READ_ONLY` on writes), no cookie set, never
+    ticked or pruned. Their next request after the budget refills gets their own sandbox.
+    Cookies naming the showcase or the live sandbox are treated as forged, and only visitor ids
+    enter the middleware's touch cache. An explicit reset over the limit gets 429 before
+    anything is deleted. Behind
     Render the client IP is the last `X-Forwarded-For` hop, which the client can't forge.
   - The background loop ticks at most the 200 most recently active sandboxes (seen in the last
     10 minutes) and prunes visitor sandboxes idle for a day.
@@ -330,10 +335,9 @@ only possible from `puente chain send --yes` with an operator key; the API has n
   - If storing the outcome fails after a good commit, the key answers 409 forever.
   - The fix is to write the idempotency row in the same transaction as the effect; v1 accepts
     the window.
-- **Global sandbox-creation budget.** Rate limits stop a flood, but enough distinct addresses
-  can drain the hourly global budget, and then new visitors get 429 until it refills. Existing
-  visitors keep working. Options: serve a shared read-only sandbox when the budget runs out, or
-  raise the cap and alert.
+- **A drained creation budget.** Enough distinct addresses can still drain the global budget. New
+  visitors then browse the shared read-only showcase rather than getting their own sandbox until
+  it refills. An alert on that event would be the production follow-up.
 - **Client IP on Render.** It is taken from the last `X-Forwarded-For` hop; check this against
   real traffic on the first deploy.
 - **Changing the live watch address** leaves earlier deposits to the old address unattributed.

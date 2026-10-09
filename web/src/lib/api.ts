@@ -180,6 +180,9 @@ export const NO_FAULTS: Faults = {
 
 export interface SandboxInfo {
   id: string
+  /** `visitor`, or `showcase`: the shared read-only fallback served while new sandboxes are rate-limited. */
+  kind: 'visitor' | 'showcase'
+  read_only: boolean
   faults: Faults
   networks: Network[]
   /** MXN per whole unit, 6-decimal strings, e.g. {"USDC": "18.452300"}. */
