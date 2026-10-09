@@ -71,14 +71,21 @@ func ReversalRef(transferID int64, generation int) string {
 	return fmt.Sprintf("deposit_reversal:%d:%d", transferID, generation)
 }
 
-// Sync scans src for net in one transaction on pool and credits what the
-// scan confirmed (or reverses what it orphaned) in the same transaction. The
-// worker loop calls it once per sandbox and network per tick.
-func Sync(ctx context.Context, pool *pgxpool.Pool, sandbox uuid.UUID, net chain.Network, src chain.Source, watch []string, confirmations uint64) (SyncResult, error) {
+// SourceFunc returns the chain source to scan, reading through tx. The
+// simulated chain lives in the database and must use tx: reading it through
+// the pool would need a second connection while tx holds the sandbox lock,
+// and enough concurrent syncs would then exhaust the pool and hang. An
+// RPC-backed source ignores tx.
+type SourceFunc func(tx pgx.Tx) chain.Source
+
+// Sync scans the source for net in one transaction on pool and credits what
+// the scan confirmed (or reverses what it orphaned) in the same transaction.
+// The worker loop calls it once per sandbox and network per tick.
+func Sync(ctx context.Context, pool *pgxpool.Pool, sandbox uuid.UUID, net chain.Network, src SourceFunc, watch []string, confirmations uint64) (SyncResult, error) {
 	var res SyncResult
 	err := store.InTx(ctx, pool, func(tx pgx.Tx) error {
 		var err error
-		if res.Scan, err = chain.Scan(ctx, tx, sandbox, net, src, watch, confirmations); err != nil {
+		if res.Scan, err = chain.Scan(ctx, tx, sandbox, net, src(tx), watch, confirmations); err != nil {
 			return fmt.Errorf("deposit: sync %s: %w", net.Key, err)
 		}
 		if res.Credit, err = Credit(ctx, tx, sandbox, net); err != nil {

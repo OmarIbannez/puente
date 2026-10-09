@@ -28,6 +28,9 @@ const healthTimeout = 2 * time.Second
 // maxAdvanceTicks caps POST /api/sandbox/advance.
 const maxAdvanceTicks = 10
 
+// advanceTimeout bounds one POST /api/sandbox/advance.
+const advanceTimeout = 20 * time.Second
+
 type healthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
@@ -95,7 +98,7 @@ func (s *server) resetSandbox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	id, err := s.newSandbox(r.Context())
+	id, err := s.newSandbox(r)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -142,14 +145,16 @@ func (s *server) advance(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, validation("ticks must be between 1 and %d", maxAdvanceTicks))
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), advanceTimeout)
+	defer cancel()
 	reports := make([]any, 0, req.Ticks)
 	for range req.Ticks {
-		sb, err := s.sandbox(r) // faults may have been consumed
+		sb, err := store.GetSandbox(ctx, s.pool, sandboxID(ctx)) // faults may have been consumed
 		if err != nil {
 			s.writeError(w, r, err)
 			return
 		}
-		rep, err := s.engine.Tick(r.Context(), sb, s.now())
+		rep, err := s.engine.Tick(ctx, sb, s.now())
 		if err != nil {
 			s.writeError(w, r, err)
 			return

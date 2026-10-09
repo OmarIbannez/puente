@@ -37,10 +37,11 @@ const (
 
 // serveConfig is the parsed serve command line.
 type serveConfig struct {
-	addr      string
-	staticDir string
-	seedDemo  bool
-	dbURL     string
+	addr       string
+	staticDir  string
+	seedDemo   bool
+	trustProxy bool
+	dbURL      string
 }
 
 func parseServe(args []string, stderr io.Writer) (serveConfig, error) {
@@ -55,6 +56,8 @@ func parseServe(args []string, stderr io.Writer) (serveConfig, error) {
 		"built web app directory; without it (or without its index.html) a placeholder page is served (env "+envStaticDir+")")
 	fs.BoolVar(&c.seedDemo, "seed-demo", envBool(envSeedDemo, true),
 		"seed every new visitor sandbox with the demo world (env "+envSeedDemo+")")
+	fs.BoolVar(&c.trustProxy, "trust-proxy", envBool(envTrustProxy, false),
+		"take the client IP for rate limits from the last X-Forwarded-For hop; set behind Render's proxy (env "+envTrustProxy+")")
 	db := dbFlag(fs)
 	if err := parse(fs, args); err != nil {
 		return serveConfig{}, err
@@ -118,12 +121,13 @@ func serveCmd(ctx context.Context, args []string, _, stderr io.Writer) error {
 		}
 	}
 	handler := api.New(api.Deps{
-		Pool:    pool,
-		Engine:  eng,
-		Static:  staticFS(c.staticDir, log),
-		Logger:  log,
-		Seed:    seedFn,
-		Version: version,
+		Pool:       pool,
+		Engine:     eng,
+		Static:     staticFS(c.staticDir, log),
+		Logger:     log,
+		Seed:       seedFn,
+		Version:    version,
+		TrustProxy: c.trustProxy,
 	})
 
 	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", c.addr)

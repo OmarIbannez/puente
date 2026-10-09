@@ -166,7 +166,8 @@ func (e *Engine) Tick(ctx context.Context, sb store.Sandbox, now time.Time) (Tic
 		if len(watch) == 0 {
 			continue
 		}
-		res, err := deposit.Sync(ctx, e.cfg.Pool, sb.ID, n.net, n.source(e.cfg.Pool, sb.ID), watch, n.confirmations)
+		res, err := deposit.Sync(ctx, e.cfg.Pool, sb.ID, n.net,
+			func(tx pgx.Tx) chain.Source { return n.source(tx, sb.ID) }, watch, n.confirmations)
 		if err != nil {
 			return report, fmt.Errorf("engine: sync %s: %w", n.net.Key, err)
 		}
@@ -309,12 +310,19 @@ type LoopConfig struct {
 	PruneIdleDays int
 	// LiveEvery paces the live sandbox, whose ticks call public RPCs.
 	LiveEvery time.Duration
+	// MaxActive caps how many visitor sandboxes one cycle ticks (the most
+	// recently seen), so a flood of new sandboxes can't slow everyone down.
+	MaxActive int
 }
+
+// TickTimeout bounds one sandbox's tick (and its reconciliation) in the
+// loop, so a slow RPC or a lock wait can't stall every other sandbox.
+const TickTimeout = 30 * time.Second
 
 // DefaultLoop is the loop pacing of `puente serve`.
 var DefaultLoop = LoopConfig{
-	Interval: 2 * time.Second, ActiveWindow: 30 * time.Minute,
-	ReconEvery: 5 * time.Minute, PruneIdleDays: 7, LiveEvery: 15 * time.Second,
+	Interval: 2 * time.Second, ActiveWindow: 10 * time.Minute, MaxActive: 200,
+	ReconEvery: 5 * time.Minute, PruneIdleDays: 1, LiveEvery: 15 * time.Second,
 }
 
 // Loop ticks every active sandbox each interval, reconciles them every
@@ -351,7 +359,7 @@ func (e *Engine) Loop(ctx context.Context, lc LoopConfig) {
 }
 
 func (e *Engine) cycle(ctx context.Context, lc LoopConfig, now time.Time, reconcile, live bool) {
-	ids, err := store.ActiveSandboxes(ctx, e.cfg.Pool, lc.ActiveWindow)
+	ids, err := store.ActiveSandboxes(ctx, e.cfg.Pool, lc.ActiveWindow, lc.MaxActive)
 	if err != nil {
 		e.log.ErrorContext(ctx, "list active sandboxes", "err", err)
 		return
@@ -360,21 +368,28 @@ func (e *Engine) cycle(ctx context.Context, lc LoopConfig, now time.Time, reconc
 		if ctx.Err() != nil {
 			return
 		}
-		sb, err := store.GetSandbox(ctx, e.cfg.Pool, id)
-		if err != nil {
-			continue // pruned meanwhile
-		}
-		if sb.Kind == store.KindLive && !live {
-			continue
-		}
-		if _, err := e.Tick(ctx, sb, now); err != nil {
-			e.log.ErrorContext(ctx, "tick sandbox", "sandbox", id.String(), "err", err)
-			continue
-		}
-		if reconcile {
-			if _, err := e.Reconcile(ctx, sb, recon.TriggerScheduled); err != nil {
-				e.log.ErrorContext(ctx, "reconcile sandbox", "sandbox", id.String(), "err", err)
-			}
+		e.cycleOne(ctx, id, now, reconcile, live)
+	}
+}
+
+// cycleOne ticks (and maybe reconciles) one sandbox under TickTimeout.
+func (e *Engine) cycleOne(ctx context.Context, id uuid.UUID, now time.Time, reconcile, live bool) {
+	ctx, cancel := context.WithTimeout(ctx, TickTimeout)
+	defer cancel()
+	sb, err := store.GetSandbox(ctx, e.cfg.Pool, id)
+	if err != nil {
+		return // pruned meanwhile
+	}
+	if sb.Kind == store.KindLive && !live {
+		return
+	}
+	if _, err := e.Tick(ctx, sb, now); err != nil {
+		e.log.ErrorContext(ctx, "tick sandbox", "sandbox", id.String(), "err", err)
+		return
+	}
+	if reconcile {
+		if _, err := e.Reconcile(ctx, sb, recon.TriggerScheduled); err != nil {
+			e.log.ErrorContext(ctx, "reconcile sandbox", "sandbox", id.String(), "err", err)
 		}
 	}
 }

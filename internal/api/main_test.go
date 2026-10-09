@@ -11,7 +11,9 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -29,6 +31,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// nextIP numbers the test clients' forwarded addresses.
+var nextIP atomic.Int32
 
 var (
 	pool *pgxpool.Pool
@@ -84,6 +89,7 @@ func run(m *testing.M) int {
 	eng = engine.New(engine.Config{Pool: pool, Payout: payout.DefaultConfig(), Logger: quiet})
 	srv = httptest.NewTLSServer(api.New(api.Deps{
 		Pool: pool, Engine: eng, Static: staticFiles, Logger: quiet, Seed: testSeed, Version: "test",
+		TrustProxy: true, // each test client sends its own X-Forwarded-For
 	}))
 	defer srv.Close()
 	return m.Run()
@@ -93,6 +99,7 @@ func run(m *testing.M) int {
 type client struct {
 	t    *testing.T
 	http *http.Client
+	ip   string // sent as X-Forwarded-For, so sandbox rate limits are per client
 }
 
 func newClient(t *testing.T) *client {
@@ -103,7 +110,7 @@ func newClient(t *testing.T) *client {
 	}
 	hc := *srv.Client()
 	hc.Jar = jar
-	return &client{t: t, http: &hc}
+	return &client{t: t, http: &hc, ip: "198.51.100." + strconv.Itoa(int(nextIP.Add(1)%250)+1)}
 }
 
 // response is a decoded HTTP response.
@@ -136,6 +143,7 @@ func (c *client) do(method, path string, body any, headers ...string) response {
 	if rd != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, "+c.ip)
 	for _, h := range headers {
 		name, value, _ := strings.Cut(h, ": ")
 		req.Header.Set(name, value)

@@ -39,6 +39,9 @@ type Deps struct {
 	Seed SeedFunc
 	// Version is reported by /api/health.
 	Version string
+	// TrustProxy reads the client IP from X-Forwarded-For (set it behind a
+	// proxy that appends to that header, like Render's).
+	TrustProxy bool
 }
 
 // SeedFunc fills a freshly created sandbox.
@@ -53,6 +56,8 @@ type server struct {
 	seed    SeedFunc
 	version string
 	touches *touchThrottle
+	creates *createLimiter
+	proxied bool
 	mux     *http.ServeMux
 }
 
@@ -74,6 +79,8 @@ func New(d Deps) http.Handler {
 		s.log = slog.Default()
 	}
 	s.touches = newTouchThrottle(touchInterval, s.now)
+	s.creates = newCreateLimiter(s.now)
+	s.proxied = d.TrustProxy
 	static := d.Static
 	if static == nil {
 		static = placeholderFS()

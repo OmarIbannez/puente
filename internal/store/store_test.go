@@ -123,7 +123,7 @@ func TestLiveSandboxIsSingleton(t *testing.T) {
 	if _, err := store.PruneIdleSandboxes(ctx, pool, 1); err != nil {
 		t.Fatal(err)
 	}
-	active, err := store.ActiveSandboxes(ctx, pool, time.Hour)
+	active, err := store.ActiveSandboxes(ctx, pool, time.Hour, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

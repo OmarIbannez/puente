@@ -31,18 +31,28 @@ type Scanner struct {
 	// InitialLookback is how far behind the head the first scan of a live
 	// (non-simulated) network starts. Simulated networks start at genesis.
 	InitialLookback uint64
-	// ReorgDepth is how many blocks behind the head stored transfers are
-	// re-checked against the canonical chain on every scan (at least 1).
+	// ReorgDepth is how many blocks behind the head are re-checked on every
+	// scan (at least 1): stored transfers' block hashes are compared with
+	// the canonical chain, and the feed for the whole window is read again.
 	ReorgDepth uint64
+	// MaxWindows caps the Logs calls of one scan (0 means no cap), so a
+	// long catch-up commits its progress in chunks instead of holding one
+	// transaction through hundreds of RPC calls.
+	MaxWindows int64
 }
 
 // DefaultScanner pages at MaxLogRange, starts live networks 1,000 blocks
-// back and re-checks the last 64 blocks for reorgs.
+// back, re-reads the last 64 blocks on every scan and makes at most 25
+// Logs calls (5,000 blocks) per scan.
 var DefaultScanner = Scanner{
 	MaxRange:        MaxLogRange,
 	InitialLookback: DefaultInitialLookback,
 	ReorgDepth:      DefaultReorgDepth,
+	MaxWindows:      DefaultMaxWindows,
 }
+
+// DefaultMaxWindows is DefaultScanner's cap on Logs calls per scan.
+const DefaultMaxWindows = 25
 
 // ScanResult counts what one scan did.
 type ScanResult struct {
@@ -77,9 +87,13 @@ func Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Network, src So
 //
 //  1. It re-checks the block hash of every seen or confirmed transfer in the
 //     last ReorgDepth blocks. A transfer whose block is gone or has a new
-//     hash is marked orphaned, and the cursor rewinds to rescan that block.
-//  2. It pulls the feed from the cursor to the head in windows of at most
-//     MaxRange blocks and inserts each transfer as seen. Rescanning a range
+//     hash is marked orphaned.
+//  2. It pulls the feed from the cursor, or from the start of the reorg
+//     window if that is earlier, to the head in windows of at most MaxRange
+//     blocks (and at most MaxWindows calls), and inserts each transfer as
+//     seen. Re-reading the reorg window every time means a log a reorg
+//     moved into an already-scanned block, or one a lagging feed reported
+//     late, is picked up on the next scan. Rescanning a range
 //     inserts nothing. An orphaned transfer that the feed reports again in a
 //     block the canonical chain confirms (re-included after a reorg) goes
 //     back to seen in that block.
@@ -124,12 +138,20 @@ func (s Scanner) Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Net
 	if err != nil {
 		return res, err
 	}
-	if rewind < next {
-		next = rewind
+	next = min(next, rewind)
+	if found { // nothing before the first scan's start was ever read
+		next = min(next, s.windowStart(head.Number))
 	}
 	res.From = next
 
+	// The cursor normally lands just past the head: if the chain shrank in
+	// a reorg, this rewinds it so the replacement blocks are scanned.
+	res.Next = head.Number + 1
 	for from := next; from <= head.Number; {
+		if s.MaxWindows > 0 && res.Windows == s.MaxWindows {
+			res.Next = from // resume here on the next scan
+			break
+		}
 		to := head.Number
 		if head.Number-from >= s.MaxRange {
 			to = from + s.MaxRange - 1
@@ -151,9 +173,6 @@ func (s Scanner) Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Net
 		from = to + 1
 	}
 
-	// The cursor always lands just past the head: if the chain shrank in a
-	// reorg, this rewinds it so the replacement blocks are scanned.
-	res.Next = head.Number + 1
 	if err := setCursor(ctx, tx, sandbox, net.Key, res.Next); err != nil {
 		return res, err
 	}
@@ -163,6 +182,14 @@ func (s Scanner) Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Net
 	}
 	res.Confirmed = n
 	return res, nil
+}
+
+// windowStart is the first block of the reorg window behind head.
+func (s Scanner) windowStart(head uint64) uint64 {
+	if head < s.ReorgDepth {
+		return 0
+	}
+	return head - s.ReorgDepth + 1
 }
 
 // start is where the first scan of net begins.

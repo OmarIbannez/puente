@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"github.com/OmarIbannez/puente/internal/recon"
 	"github.com/OmarIbannez/puente/internal/spei"
 	"github.com/OmarIbannez/puente/internal/store"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Error codes returned in {"error": {"code", "message"}}.
@@ -32,6 +35,7 @@ const (
 	CodeIdempotencyInProgress  = "IDEMPOTENCY_IN_PROGRESS"
 	CodeInsufficientFunds      = "INSUFFICIENT_FUNDS"
 	CodeReadOnly               = "READ_ONLY"
+	CodeRateLimited            = "RATE_LIMITED"
 	CodeInternal               = "INTERNAL"
 	CodeUnavailable            = "UNAVAILABLE"
 )
@@ -86,6 +90,8 @@ func classify(err error) (status int, code, msg string) {
 	case errors.As(err, &maxErr):
 		return http.StatusRequestEntityTooLarge, CodePayloadTooLarge,
 			fmt.Sprintf("request body exceeds %d bytes", maxErr.Limit)
+	case isBusy(err):
+		return http.StatusServiceUnavailable, CodeUnavailable, "the sandbox is busy; retry in a moment"
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, recon.ErrNoRuns):
 		return http.StatusNotFound, CodeNotFound, err.Error()
 	case errors.Is(err, payout.ErrInsufficientFunds):
@@ -99,6 +105,17 @@ func classify(err error) (status int, code, msg string) {
 	default:
 		return http.StatusInternalServerError, CodeInternal, "internal server error"
 	}
+}
+
+// isBusy reports a request that ran out of time: its deadline passed, or
+// Postgres gave up waiting for a lock (55P03) or cancelled a statement
+// (57014) under the session limits set in store.Open.
+func isBusy(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "57014")
 }
 
 // validationErrors are domain errors caused by the request's content.

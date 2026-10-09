@@ -24,12 +24,33 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// Session limits set on every connection. They bound how long any request
+// or tick can wait on a row lock or run a statement, so a burst of
+// contending requests degrades into errors instead of a hung pool.
+var sessionLimits = map[string]string{
+	"lock_timeout":                        "10s",
+	"statement_timeout":                   "60s",
+	"idle_in_transaction_session_timeout": "120s",
+}
+
+// minPoolConns is the floor for the pool size (pgx defaults to the CPU
+// count, which is 1 or 2 on small instances).
+const minPoolConns = 8
+
 // Open connects a pool to the database at url and verifies it with a ping.
+// Every connection gets sessionLimits; use a direct (not transaction-pooled)
+// connection string, since poolers may reject startup parameters.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("store: parse database url: %w", err)
 	}
+	for k, v := range sessionLimits {
+		if _, set := cfg.ConnConfig.RuntimeParams[k]; !set {
+			cfg.ConnConfig.RuntimeParams[k] = v
+		}
+	}
+	cfg.MaxConns = max(cfg.MaxConns, minPoolConns)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("store: create pool: %w", err)

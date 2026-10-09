@@ -118,13 +118,16 @@ func SetFaults(ctx context.Context, q Querier, id uuid.UUID, f Faults) (Sandbox,
 		id, body))
 }
 
-// ActiveSandboxes returns the ids of sandboxes seen within the last window,
-// plus the live sandbox if it exists, for the background worker.
-func ActiveSandboxes(ctx context.Context, q Querier, window time.Duration) ([]uuid.UUID, error) {
+// ActiveSandboxes returns the ids of at most limit sandboxes seen within the
+// last window, most recent first, plus the live sandbox if it exists, for
+// the background worker.
+func ActiveSandboxes(ctx context.Context, q Querier, window time.Duration, limit int) ([]uuid.UUID, error) {
 	rows, err := q.Query(ctx,
-		`SELECT id FROM sandboxes
-		 WHERE kind = 'live' OR last_seen_at > now() - make_interval(secs => $1)
-		 ORDER BY last_seen_at DESC`, window.Seconds())
+		`(SELECT id FROM sandboxes WHERE kind = 'live')
+		 UNION ALL
+		 (SELECT id FROM sandboxes
+		  WHERE kind = 'visitor' AND last_seen_at > now() - make_interval(secs => $1)
+		  ORDER BY last_seen_at DESC LIMIT $2)`, window.Seconds(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: active sandboxes: %w", err)
 	}

@@ -100,7 +100,7 @@ func (w *world) deposit(minor int64) {
 func (w *world) sync() {
 	w.t.Helper()
 	ctx := w.t.Context()
-	src := sim.New(pool, w.sb, usdc)
+	src := func(tx pgx.Tx) chain.Source { return sim.New(tx, w.sb, usdc) }
 	if _, err := deposit.Sync(ctx, pool, w.sb, usdc, src, []string{w.address}, confirmations); err != nil {
 		w.t.Fatal(err)
 	}

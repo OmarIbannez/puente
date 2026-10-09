@@ -28,6 +28,9 @@ services:
         sync: false
       - key: PUENTE_SEED_DEMO
         value: "true"
+      # Rate limits use the client IP Render's proxy appends.
+      - key: PUENTE_TRUST_PROXY
+        value: "true"
       # Live testnet mode (optional, read-only): watch this address on
       # Base Sepolia (USDC) and Arbitrum Sepolia (MXNB).
       - key: PUENTE_LIVE_WATCH_ADDRESS

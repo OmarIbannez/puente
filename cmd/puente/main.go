@@ -50,6 +50,7 @@ const (
 	envPort              = "PORT"
 	envStaticDir         = "PUENTE_STATIC_DIR"
 	envSeedDemo          = "PUENTE_SEED_DEMO"
+	envTrustProxy        = "PUENTE_TRUST_PROXY"
 	envUSDCRate          = "PUENTE_USDC_MXN_RATE"
 	envLiveWatch         = "PUENTE_LIVE_WATCH_ADDRESS"
 	envLiveUSDCRPC       = "PUENTE_LIVE_USDC_RPC"

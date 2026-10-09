@@ -125,9 +125,10 @@ func TestRescanIsIdempotent(t *testing.T) {
 	if res.Fetched != 3 || res.New != 3 || res.Next != 5 {
 		t.Fatalf("first scan = %+v, want 3 fetched, 3 new, next 5", res)
 	}
+	// A second scan re-reads the reorg window but stores nothing new.
 	res = scan(t, sb, 1)
-	if res.Fetched != 0 || res.New != 0 || res.Windows != 0 {
-		t.Fatalf("second scan = %+v, want nothing to do", res)
+	if res.New != 0 || res.Revived != 0 || res.Orphaned != 0 || res.From != 0 {
+		t.Fatalf("second scan = %+v, want the window re-read and nothing added", res)
 	}
 
 	// Forget the cursor: the whole chain is rescanned and nothing is added.
@@ -307,8 +308,8 @@ func TestReorgOrphansTransfer(t *testing.T) {
 	}
 
 	res := scan(t, sb, 2)
-	if res.Orphaned != 1 || res.From != 2 || res.New != 0 {
-		t.Fatalf("scan after reorg = %+v, want 1 orphaned, rescan from 2", res)
+	if res.Orphaned != 1 || res.From > 2 || res.New != 0 {
+		t.Fatalf("scan after reorg = %+v, want 1 orphaned and block 2 rescanned", res)
 	}
 	if r := record(t, sb, gone); r.Status != chain.StatusOrphaned || r.OrphanedAt == nil {
 		t.Fatalf("reorged transfer status %s", r.Status)

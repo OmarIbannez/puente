@@ -332,3 +332,16 @@ func TestLiveDisabled(t *testing.T) {
 		t.Fatal("chart of accounts missing")
 	}
 }
+
+func TestSandboxCreationRateLimit(t *testing.T) {
+	c := newClient(t)
+	// Without a cookie jar, every request asks for a new sandbox.
+	c.http.Jar = nil
+	for range 5 {
+		c.do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, nil)
+	}
+	c.do(http.MethodGet, "/api/sandbox", nil).wantError(t, http.StatusTooManyRequests, api.CodeRateLimited)
+	// The forged first X-Forwarded-For hop doesn't buy a new budget, and
+	// another client is unaffected.
+	newClient(t).do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, nil)
+}

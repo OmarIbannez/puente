@@ -106,7 +106,7 @@ func (w world) sync(t *testing.T) deposit.SyncResult {
 
 func (w world) syncFrom(t *testing.T, net chain.Network, src chain.Source) deposit.SyncResult {
 	t.Helper()
-	res, err := deposit.Sync(t.Context(), pool, w.sb, net, src, nil, confs)
+	res, err := deposit.Sync(t.Context(), pool, w.sb, net, func(pgx.Tx) chain.Source { return src }, nil, confs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestWatchAddresses(t *testing.T) {
 	w.deposit(t, stranger, usdc(2_000_000))
 	w.deposit(t, w.address, usdc(1_000_000))
 	w.mine(t, confs-1)
-	res, err := deposit.Sync(ctx, pool, w.sb, simUSDC, sim.New(pool, w.sb, simUSDC), watch, confs)
+	res, err := deposit.Sync(ctx, pool, w.sb, simUSDC, func(tx pgx.Tx) chain.Source { return sim.New(tx, w.sb, simUSDC) }, watch, confs)
 	if err != nil || res.Scan.New != 1 || res.Credit != (deposit.Result{Credited: 1}) {
 		t.Fatalf("Sync = %+v, %v", res, err)
 	}
