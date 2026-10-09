@@ -1,6 +1,7 @@
 # Local stack. Postgres is published on 5435 so it runs next to Sentinel (5432),
 # Colibrí (5433) and Abono (5434).
 #
+#   docker compose up --build         db + app on http://localhost:8000, seeded per visitor
 #   docker compose up -d --wait db    just the database, for `just dev`
 services:
   db:
@@ -18,6 +19,22 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+
+  app:
+    build: .
+    image: puente:local
+    environment:
+      DATABASE_URL: postgres://puente:puente@db:5432/puente?sslmode=disable
+      PUENTE_SEED_DEMO: "true"
+      # Optional live testnet mode; see .env.example.
+      PUENTE_LIVE_WATCH_ADDRESS: ${PUENTE_LIVE_WATCH_ADDRESS:-}
+      PUENTE_LIVE_USDC_RPC: ${PUENTE_LIVE_USDC_RPC:-}
+      PUENTE_LIVE_MXNB_RPC: ${PUENTE_LIVE_MXNB_RPC:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:

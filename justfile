@@ -46,8 +46,9 @@ up:
 down:
     docker compose down -v
 
-# Build and start the stack, then check the seeded API answers
+# Build and start the whole stack in Docker, then run the end-to-end smoke test
 smoke:
+    docker compose up -d --build --wait
     ./scripts/smoke.sh
 
 # Recompile the test ERC-20 used by the EVM adapter tests (needs Docker)

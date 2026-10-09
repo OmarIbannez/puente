@@ -1,0 +1,38 @@
+# Render Blueprint: one free web service running the whole image (Go API, web
+# app and worker loop). The database is Neon (Render's single free Postgres
+# slot belongs to Abono): set DATABASE_URL to the Neon connection string in
+# the dashboard when the Blueprint asks for it.
+#
+# Create it once: Render dashboard > New > Blueprint, pick this repository.
+# After that, every push to main redeploys once the GitHub Actions checks pass.
+services:
+  - type: web
+    name: puente
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    # Docs-only commits don't need a redeploy.
+    buildFilter:
+      paths:
+        - cmd/**
+        - internal/**
+        - web/**
+        - Dockerfile
+        - go.mod
+        - go.sum
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PUENTE_SEED_DEMO
+        value: "true"
+      # Live testnet mode (optional, read-only): watch this address on
+      # Base Sepolia (USDC) and Arbitrum Sepolia (MXNB).
+      - key: PUENTE_LIVE_WATCH_ADDRESS
+        sync: false
+      - key: PUENTE_LIVE_USDC_RPC
+        value: https://sepolia.base.org
+      - key: PUENTE_LIVE_MXNB_RPC
+        value: https://sepolia-rollup.arbitrum.io/rpc
