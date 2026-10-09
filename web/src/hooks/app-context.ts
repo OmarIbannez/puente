@@ -21,6 +21,10 @@ export interface AppContextValue {
   epoch: number
   bump: () => void
   toast: (toast: ToastInput) => void
+  /** Starts waiting for the server again after giving up. */
+  retry: () => void
+  /** When the current wait for the server began (ms since epoch). */
+  wakeStartedAt: number
 }
 
 export const AppContext = createContext<AppContextValue | null>(null)

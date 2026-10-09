@@ -18,34 +18,22 @@ export function Label({ className, ...props }: ComponentProps<'label'>) {
 }
 
 interface MoneyInputProps extends Omit<ComponentProps<'input'>, 'type'> {
-  large?: boolean
+  /** The asset code shown as a suffix, e.g. "USDC". */
+  asset: string
 }
 
-/** A peso amount field with a leading "$" and an "MXN" suffix. */
-export function MoneyInput({ className, large = false, ...props }: MoneyInputProps) {
+/** An amount field with the asset code as a suffix. */
+export function MoneyInput({ className, asset, ...props }: MoneyInputProps) {
   return (
     <div className="relative">
-      <span
-        className={cn(
-          'pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground',
-          large ? 'text-xl' : 'text-sm',
-        )}
-      >
-        $
-      </span>
       <input
         inputMode="decimal"
         autoComplete="off"
-        className={cn(
-          fieldBase,
-          'tabular pl-7 pr-14',
-          large ? 'h-14 pl-8 text-2xl font-semibold tracking-tight' : 'h-9',
-          className,
-        )}
+        className={cn(fieldBase, 'tabular h-9 pr-16 font-mono', className)}
         {...props}
       />
       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">
-        MXN
+        {asset}
       </span>
     </div>
   )

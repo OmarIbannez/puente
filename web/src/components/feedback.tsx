@@ -1,4 +1,4 @@
-import { AlertCircle, RefreshCw, type LucideIcon } from 'lucide-react'
+import { CircleAlert, RefreshCw, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Alert } from '@/components/ui/alert'
@@ -17,7 +17,7 @@ interface ErrorNoticeProps {
 export function ErrorNotice({ error, title, onRetry, className }: ErrorNoticeProps) {
   return (
     <Alert tone="danger" role="alert" className={className}>
-      <AlertCircle />
+      <CircleAlert />
       <div className="min-w-0 flex-1">
         {title && <p className="font-medium">{title}</p>}
         <p className={cn(title && 'text-muted-foreground')}>{error.message}</p>
