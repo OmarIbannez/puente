@@ -1,0 +1,5 @@
+.env
+bin/
+node_modules/
+web/dist/
+.worktrees/
