@@ -485,3 +485,23 @@ func TestListLimits(t *testing.T) {
 		t.Fatalf("Orders not newest first: %s", got[0].Clave)
 	}
 }
+
+func TestOrdersByClave(t *testing.T) {
+	sb := storetest.Sandbox(t, pool).ID
+	other := storetest.Sandbox(t, pool).ID
+	mustSubmit(t, sb, order(1, 100))
+	mustSubmit(t, sb, order(2, 200))
+	mustSubmit(t, other, order(3, 300))
+	claves := []string{order(1, 0).Clave, order(2, 0).Clave, order(3, 0).Clave, order(4, 0).Clave}
+	got, err := rail.OrdersByClave(t.Context(), pool, sb, claves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[claves[0]].Amount != mxn(100) || got[claves[1]].Amount != mxn(200) {
+		t.Fatalf("OrdersByClave = %+v", got)
+	}
+	empty, err := rail.OrdersByClave(t.Context(), pool, sb, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("OrdersByClave(nil) = %v, %v", empty, err)
+	}
+}
