@@ -88,6 +88,12 @@ func (s *server) getSandbox(w http.ResponseWriter, r *http.Request) {
 
 // resetSandbox deletes the visitor's sandbox and starts a fresh, seeded one.
 func (s *server) resetSandbox(w http.ResponseWriter, r *http.Request) {
+	// Check the budget before deleting anything: a refused reset must leave
+	// the visitor's sandbox in place.
+	if err := s.allowCreate(r); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
 	if c, err := r.Cookie(SandboxCookie); err == nil {
 		if old, err := uuid.Parse(c.Value); err == nil {
 			s.touches.forget(old)
@@ -98,7 +104,7 @@ func (s *server) resetSandbox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	id, err := s.newSandbox(r)
+	id, err := s.createSandbox(r.Context())
 	if err != nil {
 		s.writeError(w, r, err)
 		return

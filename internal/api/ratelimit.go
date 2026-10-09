@@ -94,19 +94,26 @@ func (l *createLimiter) sweep(now time.Time) {
 
 // clientIP identifies the client for rate limiting. Behind a trusted proxy
 // (Render), the last X-Forwarded-For entry is the address the proxy saw;
-// earlier entries are supplied by the client and can be forged.
+// earlier entries are supplied by the client and can be forged. IPv6
+// clients are grouped by /64, since one host typically owns a whole /64.
 func clientIP(r *http.Request, trustProxy bool) string {
+	raw := ""
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
-			if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
-				return ip
-			}
+			raw = strings.TrimSpace(parts[len(parts)-1])
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if raw == "" {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		raw = host
 	}
-	return host
+	ip := net.ParseIP(raw)
+	if ip == nil || ip.To4() != nil {
+		return raw
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }

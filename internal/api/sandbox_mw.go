@@ -141,11 +141,26 @@ func (s *server) resolveSandbox(w http.ResponseWriter, r *http.Request) (uuid.UU
 // Creation is rate-limited per client IP (see createLimiter): a client
 // over its budget gets 429 instead of another seeded world.
 func (s *server) newSandbox(r *http.Request) (uuid.UUID, error) {
+	if err := s.allowCreate(r); err != nil {
+		return uuid.Nil, err
+	}
+	return s.createSandbox(r.Context())
+}
+
+// allowCreate spends one sandbox creation from the client's budget, or
+// returns the 429 error.
+func (s *server) allowCreate(r *http.Request) error {
 	if !s.creates.allow(clientIP(r, s.proxied)) {
-		return uuid.Nil, errorf(http.StatusTooManyRequests, CodeRateLimited,
+		return errorf(http.StatusTooManyRequests, CodeRateLimited,
 			"too many new sandboxes from this address; keep your cookie or retry in a minute")
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), seedTimeout)
+	return nil
+}
+
+// createSandbox creates a sandbox and, with a seed function, seeds it. A
+// sandbox whose seeding fails is deleted.
+func (s *server) createSandbox(parent context.Context) (uuid.UUID, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), seedTimeout)
 	defer cancel()
 	sb, err := store.CreateSandbox(ctx, s.pool)
 	if err != nil {

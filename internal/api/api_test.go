@@ -345,3 +345,16 @@ func TestSandboxCreationRateLimit(t *testing.T) {
 	// another client is unaffected.
 	newClient(t).do(http.MethodGet, "/api/sandbox", nil).want(t, http.StatusOK, nil)
 }
+
+func TestRateLimitedResetKeepsTheSandbox(t *testing.T) {
+	c := newClient(t)
+	first := c.sandbox().ID // spends 1 of the burst of 5
+	for range 4 {
+		c.do(http.MethodPost, "/api/sandbox/reset", nil).want(t, http.StatusOK, nil)
+	}
+	kept := c.sandbox().ID
+	c.do(http.MethodPost, "/api/sandbox/reset", nil).wantError(t, http.StatusTooManyRequests, api.CodeRateLimited)
+	if got := c.sandbox().ID; got != kept || got == first {
+		t.Fatalf("after a refused reset the sandbox is %s, want %s kept", got, kept)
+	}
+}

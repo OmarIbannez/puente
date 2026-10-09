@@ -142,8 +142,9 @@ The scanner (`chain.Scan`) reads the token's `Transfer` logs to watched addresse
 
 `deposit.Credit` posts `deposit:<transfer>:<generation>` for confirmed transfers to a customer's
 address. It posts `deposit_reversal:<transfer>:<generation>` when a credited transfer is
-orphaned, or comes back `seen` (orphaned and revived within one scan, so its block changed under
-the credit). Once the new block is confirmed, the transfer is credited again as generation 2. A partial unique index allows at most one open credit per
+orphaned, or comes back `seen` (orphaned and revived within one scan into a block that isn't
+confirmed yet). Once the new block is confirmed, the transfer is credited again as generation 2.
+A transaction re-included deep enough to confirm in the same scan simply keeps its credit. A partial unique index allows at most one open credit per
 transfer. Candidate rows are locked `FOR UPDATE` and re-read after the lock, so concurrent
 crediters can't double-credit; the test fails if the lock is removed. A reversal may take a
 customer negative. That is deliberate: it is surfaced as a liability to collect, not hidden.
@@ -252,7 +253,9 @@ with zero breaks.
     Render the client IP is the last `X-Forwarded-For` hop, which the client can't forge.
   - The background loop ticks at most the 200 most recently active sandboxes (seen in the last
     10 minutes) and prunes visitor sandboxes idle for a day.
-  - A sandbox being seeded is hidden from the loop until the seed finishes.
+  - A sandbox being seeded is left out of new loop cycles until the seed finishes. A cycle
+    already in progress may still tick it, which the seed tolerates: it waits on database
+    state.
 - **Timeouts.** `/api/sandbox/advance` has a 20 s deadline. A request that runs out of time, or
   hits a lock or statement timeout, gets 503 `UNAVAILABLE` and can be retried.
 - **Idempotency.** `POST /api/payouts`, `/api/payouts/{id}/cancel` and `/api/deposits/simulate`
@@ -327,6 +330,12 @@ only possible from `puente chain send --yes` with an operator key; the API has n
   - If storing the outcome fails after a good commit, the key answers 409 forever.
   - The fix is to write the idempotency row in the same transaction as the effect; v1 accepts
     the window.
+- **Global sandbox-creation budget.** Rate limits stop a flood, but enough distinct addresses
+  can drain the hourly global budget, and then new visitors get 429 until it refills. Existing
+  visitors keep working. Options: serve a shared read-only sandbox when the budget runs out, or
+  raise the cap and alert.
+- **Client IP on Render.** It is taken from the last `X-Forwarded-For` hop; check this against
+  real traffic on the first deploy.
 - **Changing the live watch address** leaves earlier deposits to the old address unattributed.
   Reconciliation reports them as `missing_on_ledger` from then on.
 - **Session limits are startup parameters,** so `DATABASE_URL` must be a direct connection, not a
