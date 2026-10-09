@@ -81,6 +81,9 @@ type AccountInfo struct {
 	Type AccountType `json:"type"`
 	// Assets lists the assets the account may hold, in display order.
 	Assets []money.Asset `json:"assets"`
+	// PerParty marks a customer sub-ledger account: every posting to it
+	// names the customer (Posting.Party).
+	PerParty bool `json:"per_party"`
 }
 
 // Holds reports whether the account may hold asset.
@@ -100,14 +103,14 @@ var (
 )
 
 var chart = []AccountInfo{
-	{HotWallet, "Hot wallet (on-chain)", TypeAsset, stablecoins},
-	{SPEISettlement, "SPEI settlement account", TypeAsset, pesos},
-	{CustomerBalances, "Customer balances", TypeLiability, stablecoins},
-	{PayoutsReserved, "Payouts reserved", TypeLiability, stablecoins},
-	{SPEIInFlight, "SPEI payouts in flight", TypeLiability, pesos},
-	{TreasuryEquity, "Treasury equity", TypeEquity, pesos},
-	{FXClearing, "FX conversion clearing", TypeEquity, money.Assets},
-	{FeeIncome, "Payout fee income", TypeRevenue, stablecoins},
+	{Code: HotWallet, Name: "Hot wallet (on-chain)", Type: TypeAsset, Assets: stablecoins},
+	{Code: SPEISettlement, Name: "SPEI settlement account", Type: TypeAsset, Assets: pesos},
+	{Code: CustomerBalances, Name: "Customer balances", Type: TypeLiability, Assets: stablecoins, PerParty: true},
+	{Code: PayoutsReserved, Name: "Payouts reserved", Type: TypeLiability, Assets: stablecoins, PerParty: true},
+	{Code: SPEIInFlight, Name: "SPEI payouts in flight", Type: TypeLiability, Assets: pesos},
+	{Code: TreasuryEquity, Name: "Treasury equity", Type: TypeEquity, Assets: pesos},
+	{Code: FXClearing, Name: "FX conversion clearing", Type: TypeEquity, Assets: money.Assets},
+	{Code: FeeIncome, Name: "Payout fee income", Type: TypeRevenue, Assets: stablecoins},
 }
 
 // All returns the chart of accounts in code order. The result is a copy the

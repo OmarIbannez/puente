@@ -32,20 +32,33 @@ var (
 	// exists with a different kind or different postings. It always signals
 	// a bug in the caller: a ref must name exactly one business event.
 	ErrRefConflict = errors.New("ledger: ref already posted with different content")
+	// ErrParty means a sub-ledger posting has no party, or a posting to
+	// another account has one.
+	ErrParty = errors.New("ledger: party required exactly on sub-ledger accounts")
 )
 
 // Posting is one line of a journal entry: a debit when Amount is positive,
-// a credit when negative.
+// a credit when negative. Party names the customer for sub-ledger accounts
+// (see AccountInfo.PerParty) and is uuid.Nil everywhere else.
 type Posting struct {
 	Account Account      `json:"account"`
 	Amount  money.Amount `json:"amount"`
+	Party   uuid.UUID    `json:"party,omitzero"`
 }
 
 // Debit returns a posting that debits amount (which should be positive) to a.
-func Debit(a Account, amount money.Amount) Posting { return Posting{a, amount} }
+func Debit(a Account, amount money.Amount) Posting { return Posting{Account: a, Amount: amount} }
 
 // Credit returns a posting that credits amount (which should be positive) to a.
-func Credit(a Account, amount money.Amount) Posting { return Posting{a, amount.Neg()} }
+func Credit(a Account, amount money.Amount) Posting {
+	return Posting{Account: a, Amount: amount.Neg()}
+}
+
+// For returns p assigned to the customer party, for sub-ledger accounts.
+func (p Posting) For(party uuid.UUID) Posting {
+	p.Party = party
+	return p
+}
 
 // Subject links an entry to the business object it records, such as a
 // payout or a chain transfer.
@@ -70,7 +83,7 @@ type Entry struct {
 // Validate checks the double-entry rules: a known kind, a sandbox, a
 // non-empty ref of at most MaxRefLen characters, a complete subject if any,
 // at least two postings, known accounts holding only their allowed assets,
-// no zero amounts and a zero sum for every asset.
+// a party on exactly the sub-ledger postings, no zero amounts and a zero sum for every asset.
 func (e Entry) Validate() error {
 	if !e.Kind.Valid() {
 		return fmt.Errorf("%w: %q", ErrUnknownKind, e.Kind)
@@ -95,6 +108,9 @@ func (e Entry) Validate() error {
 		}
 		if !info.Holds(p.Amount.Asset) {
 			return fmt.Errorf("%w: posting %d %q in %s", ErrAssetNotAllowed, i, string(p.Amount.Asset), p.Account)
+		}
+		if info.PerParty != (p.Party != uuid.Nil) {
+			return fmt.Errorf("%w: posting %d account %s", ErrParty, i, p.Account)
 		}
 		if p.Amount.IsZero() {
 			return fmt.Errorf("%w: posting %d account %s", ErrZeroAmount, i, p.Account)
@@ -148,16 +164,21 @@ func Post(ctx context.Context, tx pgx.Tx, e Entry) (id int64, posted bool, err e
 	accounts := make([]int, len(e.Postings))
 	assets := make([]string, len(e.Postings))
 	amounts := make([]int64, len(e.Postings))
+	parties := make([]string, len(e.Postings))
 	for i, p := range e.Postings {
 		accounts[i] = int(p.Account)
 		assets[i] = string(p.Amount.Asset)
 		amounts[i] = p.Amount.Minor
+		if p.Party != uuid.Nil {
+			parties[i] = p.Party.String()
+		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO postings (entry_id, sandbox_id, account_code, asset, amount_minor)
-		SELECT $1, $2, t.account, t.asset, t.amount
-		FROM unnest($3::int[], $4::text[], $5::bigint[]) WITH ORDINALITY AS t(account, asset, amount, ord)
+	_, err = tx.Exec(ctx, `INSERT INTO postings (entry_id, sandbox_id, account_code, asset, amount_minor, party_id)
+		SELECT $1, $2, t.account, t.asset, t.amount, NULLIF(t.party, '')::uuid
+		FROM unnest($3::int[], $4::text[], $5::bigint[], $6::text[])
+		     WITH ORDINALITY AS t(account, asset, amount, party, ord)
 		ORDER BY t.ord`,
-		id, e.SandboxID, accounts, assets, amounts)
+		id, e.SandboxID, accounts, assets, amounts, parties)
 	if err != nil {
 		return 0, false, fmt.Errorf("ledger: insert postings of %q: %w", e.Ref, err)
 	}
@@ -196,5 +217,6 @@ func comparePostings(x, y Posting) int {
 		cmp.Compare(x.Account, y.Account),
 		cmp.Compare(x.Amount.Asset, y.Amount.Asset),
 		cmp.Compare(x.Amount.Minor, y.Amount.Minor),
+		cmp.Compare(x.Party.String(), y.Party.String()),
 	)
 }

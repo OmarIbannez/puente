@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/OmarIbannez/puente/internal/customer"
 	"github.com/OmarIbannez/puente/internal/ledger"
 	"github.com/OmarIbannez/puente/internal/money"
 	"github.com/OmarIbannez/puente/internal/store"
@@ -27,9 +28,40 @@ func usdc(minor int64) money.Amount { return money.New(money.USDC, minor) }
 func mxnb(minor int64) money.Amount { return money.New(money.MXNB, minor) }
 func mxn(minor int64) money.Amount  { return money.New(money.MXN, minor) }
 
+// parties caches one test customer per sandbox.
+var parties sync.Map
+
+// party returns the sandbox's test customer, creating it on first use.
+func party(t testing.TB, sb uuid.UUID) uuid.UUID {
+	t.Helper()
+	if id, ok := parties.Load(sb); ok {
+		return id.(uuid.UUID)
+	}
+	c, err := customer.Create(t.Context(), pool, sb, "Test customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, _ := parties.LoadOrStore(sb, c.ID)
+	return actual.(uuid.UUID)
+}
+
+// withParty assigns the sandbox's test customer to every sub-ledger posting
+// of e that has none, so tests can build entries with plain Debit/Credit.
+func withParty(t testing.TB, e ledger.Entry) ledger.Entry {
+	t.Helper()
+	e.Postings = slices.Clone(e.Postings)
+	for i, p := range e.Postings {
+		if info, ok := ledger.Lookup(p.Account); ok && info.PerParty && p.Party == uuid.Nil && e.SandboxID != uuid.Nil {
+			e.Postings[i] = p.For(party(t, e.SandboxID))
+		}
+	}
+	return e
+}
+
 // post posts e in its own transaction and fails the test on error.
 func post(t *testing.T, e ledger.Entry) (int64, bool) {
 	t.Helper()
+	e = withParty(t, e)
 	var (
 		id     int64
 		posted bool
@@ -47,6 +79,7 @@ func post(t *testing.T, e ledger.Entry) (int64, bool) {
 
 func tryPost(t *testing.T, e ledger.Entry) error {
 	t.Helper()
+	e = withParty(t, e)
 	return store.InTx(t.Context(), pool, func(tx pgx.Tx) error {
 		_, _, err := ledger.Post(t.Context(), tx, e)
 		return err
@@ -134,8 +167,9 @@ func TestChart(t *testing.T) {
 
 func TestValidateErrors(t *testing.T) {
 	sb := uuid.New()
+	who := uuid.New()
 	good := []ledger.Posting{
-		ledger.Debit(ledger.HotWallet, usdc(100)), ledger.Credit(ledger.CustomerBalances, usdc(100)),
+		ledger.Debit(ledger.HotWallet, usdc(100)), ledger.Credit(ledger.CustomerBalances, usdc(100)).For(who),
 	}
 	valid := func() ledger.Entry {
 		return ledger.Entry{SandboxID: sb, Ref: "deposit:1", Kind: ledger.KindDeposit, Postings: slices.Clone(good)}
@@ -167,7 +201,8 @@ func TestValidateErrors(t *testing.T) {
 		{"zero amount", func(e *ledger.Entry) {
 			e.Postings = append(e.Postings, ledger.Debit(ledger.HotWallet, usdc(0)))
 		}, ledger.ErrZeroAmount},
-		{"unbalanced", func(e *ledger.Entry) { e.Postings[1] = ledger.Credit(ledger.CustomerBalances, usdc(99)) }, ledger.ErrUnbalanced},
+		{"unbalanced", func(e *ledger.Entry) { e.Postings[1] = ledger.Credit(ledger.CustomerBalances, usdc(99)).For(who) }, ledger.ErrUnbalanced},
+		{"party outside the sub-ledger", func(e *ledger.Entry) { e.Postings[0] = e.Postings[0].For(who) }, ledger.ErrParty},
 		{"balanced in total, not per asset", func(e *ledger.Entry) {
 			e.Postings = []ledger.Posting{
 				ledger.Debit(ledger.FXClearing, usdc(5)), ledger.Credit(ledger.FXClearing, mxn(5)),
@@ -327,6 +362,7 @@ func TestPostExactlyOnce(t *testing.T) {
 	err := store.InTx(ctx, pool, func(tx pgx.Tx) error {
 		other := deposit
 		other.Ref = "deposit:43"
+		other = withParty(t, other)
 		first, _, err := ledger.Post(ctx, tx, other)
 		if err != nil {
 			return err
@@ -393,6 +429,7 @@ func TestPostExactlyOnce(t *testing.T) {
 			ledger.Debit(ledger.CustomerBalances, usdc(1_000_000)), ledger.Credit(ledger.PayoutsReserved, usdc(1_000_000)),
 		},
 	}
+	race = withParty(t, race)
 	const workers = 10
 	var (
 		wg      sync.WaitGroup
@@ -724,7 +761,7 @@ func TestEntries(t *testing.T) {
 		t.Fatalf("payout p1 entries = %v, want %v", refs, wantRefs)
 	}
 	expected, _ := payoutEntries(t, sb, "p1")
-	if !slices.Equal(p1[2].Postings, expected[1].Postings) {
+	if !slices.Equal(p1[2].Postings, withParty(t, expected[1]).Postings) {
 		t.Fatalf("submit postings = %+v, want %+v", p1[2].Postings, expected[1].Postings)
 	}
 
@@ -832,5 +869,63 @@ func TestSchemaAcceptsChart(t *testing.T) {
 	}
 	if got := countEntries(t, sb); got != n {
 		t.Fatalf("%d entries, want %d", got, n)
+	}
+}
+
+func TestPartySubLedger(t *testing.T) {
+	ctx := t.Context()
+	sb := storetest.Sandbox(t, pool).ID
+	alice, err := customer.Create(ctx, pool, sb, "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := customer.Create(ctx, pool, sb, "Bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deposit := func(ref string, who uuid.UUID, minor int64) ledger.Entry {
+		return ledger.Entry{SandboxID: sb, Ref: ref, Kind: ledger.KindDeposit, Postings: []ledger.Posting{
+			ledger.Debit(ledger.HotWallet, usdc(minor)), ledger.Credit(ledger.CustomerBalances, usdc(minor)).For(who),
+		}}
+	}
+	post(t, deposit("deposit:a", alice.ID, 7_000_000))
+	post(t, deposit("deposit:b", bob.ID, 3_000_000))
+
+	for who, want := range map[uuid.UUID]int64{alice.ID: -7_000_000, bob.ID: -3_000_000} {
+		got, err := ledger.PartyBalance(ctx, pool, sb, who, ledger.CustomerBalances, money.USDC)
+		if err != nil || got.Minor != want {
+			t.Errorf("PartyBalance(%s) = %v, %v; want %d", who, got, err, want)
+		}
+	}
+	if _, err := ledger.PartyBalance(ctx, pool, sb, alice.ID, ledger.HotWallet, money.USDC); !errors.Is(err, ledger.ErrParty) {
+		t.Errorf("PartyBalance on a non-sub-ledger account = %v, want ErrParty", err)
+	}
+
+	// Retrying with another party is a different event, not a replay.
+	if err := tryPost(t, deposit("deposit:a", bob.ID, 7_000_000)); !errors.Is(err, ledger.ErrRefConflict) {
+		t.Errorf("same ref, other party = %v, want ErrRefConflict", err)
+	}
+	// A missing party is rejected in Go...
+	missing := deposit("deposit:c", alice.ID, 1)
+	missing.Postings[1].Party = uuid.Nil
+	if err := missing.Validate(); !errors.Is(err, ledger.ErrParty) {
+		t.Errorf("Validate without party = %v, want ErrParty", err)
+	}
+	// ...and by the database, as is a party from another sandbox.
+	other := storetest.Sandbox(t, pool).ID
+	err = store.InTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `WITH e AS (INSERT INTO journal_entries (sandbox_id, ref, kind)
+			VALUES ($1, 'raw', 'deposit') RETURNING id)
+			INSERT INTO postings (entry_id, sandbox_id, account_code, asset, amount_minor)
+			SELECT id, $1, 2010, 'USDC', v FROM e, unnest(ARRAY[-1, 1]) AS v`, sb)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "postings_party") {
+		t.Errorf("raw sub-ledger posting without party = %v, want postings_party violation", err)
+	}
+	foreign := deposit("deposit:x", alice.ID, 1)
+	foreign.SandboxID = other
+	if err := tryPost(t, foreign); err == nil || !strings.Contains(err.Error(), "postings_party_fk") {
+		t.Errorf("party from another sandbox = %v, want postings_party_fk violation", err)
 	}
 }

@@ -43,6 +43,29 @@ func Balance(ctx context.Context, q store.Querier, sandboxID uuid.UUID, account 
 	return money.New(asset, sum), nil
 }
 
+// PartyBalance returns the raw signed balance (debits positive) of one
+// customer's asset in a sub-ledger account.
+func PartyBalance(ctx context.Context, q store.Querier, sandboxID, party uuid.UUID, account Account, asset money.Asset) (money.Amount, error) {
+	info, ok := Lookup(account)
+	if !ok {
+		return money.Amount{}, fmt.Errorf("%w: %d", ErrUnknownAccount, int(account))
+	}
+	if !info.PerParty {
+		return money.Amount{}, fmt.Errorf("%w: %s is not a sub-ledger account", ErrParty, account)
+	}
+	if !info.Holds(asset) {
+		return money.Amount{}, fmt.Errorf("%w: %q in %s", ErrAssetNotAllowed, string(asset), account)
+	}
+	var sum int64
+	err := q.QueryRow(ctx, `SELECT COALESCE(sum(amount_minor), 0)::bigint
+		FROM postings WHERE sandbox_id = $1 AND party_id = $2 AND account_code = $3 AND asset = $4`,
+		sandboxID, party, int(account), string(asset)).Scan(&sum)
+	if err != nil {
+		return money.Amount{}, fmt.Errorf("ledger: balance of %s %s for %s: %w", account, asset, party, err)
+	}
+	return money.New(asset, sum), nil
+}
+
 // AccountBalance is the balance of one asset in one account of a sandbox.
 type AccountBalance struct {
 	AccountInfo
@@ -241,7 +264,7 @@ func attachPostings(ctx context.Context, q store.Querier, sandboxID uuid.UUID, e
 		ids[i] = e.ID
 		index[e.ID] = i
 	}
-	rows, err := q.Query(ctx, `SELECT entry_id, account_code, asset, amount_minor
+	rows, err := q.Query(ctx, `SELECT entry_id, account_code, asset, amount_minor, party_id
 		FROM postings WHERE sandbox_id = $1 AND entry_id = ANY($2)
 		ORDER BY entry_id, id`, sandboxID, ids)
 	if err != nil {
@@ -254,8 +277,9 @@ func attachPostings(ctx context.Context, q store.Querier, sandboxID uuid.UUID, e
 			code    int
 			asset   string
 			minor   int64
+			party   uuid.NullUUID
 		)
-		if err := rows.Scan(&entryID, &code, &asset, &minor); err != nil {
+		if err := rows.Scan(&entryID, &code, &asset, &minor, &party); err != nil {
 			return fmt.Errorf("ledger: postings: %w", err)
 		}
 		i, ok := index[entryID]
@@ -263,7 +287,7 @@ func attachPostings(ctx context.Context, q store.Querier, sandboxID uuid.UUID, e
 			continue
 		}
 		entries[i].Postings = append(entries[i].Postings,
-			Posting{Account: Account(code), Amount: money.New(money.Asset(asset), minor)})
+			Posting{Account: Account(code), Amount: money.New(money.Asset(asset), minor), Party: party.UUID})
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("ledger: postings: %w", err)
