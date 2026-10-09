@@ -56,6 +56,9 @@ const (
 	KindLiquidationDebit StatementKind = "liquidation_debit"
 	// KindReturnCredit: a settled order came back (positive).
 	KindReturnCredit StatementKind = "return_credit"
+	// KindBankFee: the bank charged the settlement account (negative). Only
+	// InjectBankFee books one; Puente's ledger never expects it.
+	KindBankFee StatementKind = "bank_fee"
 )
 
 // Errors returned by the simulated rail.
