@@ -38,7 +38,7 @@ dev:
 web:
     npm --prefix web run dev
 
-# Everything in containers, seeded, on http://localhost:8000
+# Everything in containers, seeded, on http://localhost:8000 (PUENTE_PORT to change it)
 up:
     docker compose up --build
 
@@ -49,7 +49,7 @@ down:
 # Build and start the whole stack in Docker, then run the end-to-end smoke test
 smoke:
     docker compose up -d --build --wait
-    ./scripts/smoke.sh
+    ./scripts/smoke.sh http://localhost:${PUENTE_PORT:-8000}
 
 # Recompile the test ERC-20 used by the EVM adapter tests (needs Docker)
 contracts:

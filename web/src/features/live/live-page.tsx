@@ -17,7 +17,7 @@ const ENV = [
   { name: 'PUENTE_LIVE_USDC_RPC', what: 'A Base Sepolia RPC URL; follows Circle USDC (chain 84532).' },
   { name: 'PUENTE_LIVE_MXNB_RPC', what: 'An Arbitrum Sepolia RPC URL; follows Bitso MXNB (chain 421614).' },
   { name: 'PUENTE_LIVE_WATCH_ADDRESS', what: 'The deposit address to watch on every live network (0x…).' },
-  { name: 'PUENTE_CONFIRMATIONS', what: 'Optional. Blocks before a live deposit is credited (default 5).' },
+  { name: 'PUENTE_LIVE_CONFIRMATIONS', what: 'Optional. Blocks before a live deposit is credited (default 5).' },
 ]
 
 function Disabled() {

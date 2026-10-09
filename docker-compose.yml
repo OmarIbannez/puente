@@ -31,7 +31,7 @@ services:
       PUENTE_LIVE_USDC_RPC: ${PUENTE_LIVE_USDC_RPC:-}
       PUENTE_LIVE_MXNB_RPC: ${PUENTE_LIVE_MXNB_RPC:-}
     ports:
-      - "8000:8000"
+      - "${PUENTE_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
