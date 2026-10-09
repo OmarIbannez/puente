@@ -63,14 +63,27 @@ func TestReorgReincludedTransferRevives(t *testing.T) {
 		t.Fatalf("scan = %+v", res)
 	}
 
-	// Blocks 2 and 3 are replaced; the transaction lands in the new block 3.
+	// Blocks 2 and 3 are replaced, but a stale feed still reports the log in
+	// the old block 2: the transfer is orphaned and not revived.
 	src.head = 4
 	src.hashes[2], src.hashes[3], src.hashes[4] = hash32('a'), hash32('b'), hash32('c')
+	res := scanWith(t, chain.DefaultScanner, sb, simUSDC, src, 2)
+	if res.Orphaned != 1 || res.Revived != 0 || res.Fetched != 1 {
+		t.Fatalf("scan with stale feed = %+v, want orphaned only", res)
+	}
+	if r := record(t, sb, tr); r.Status != chain.StatusOrphaned {
+		t.Fatalf("stale feed revived the transfer: %s", r.Status)
+	}
+
+	// The feed catches up: the transaction was re-included in the new block 3.
 	tr.BlockNumber, tr.BlockHash = 3, hash32('b')
 	src.logs = []chain.Transfer{tr}
-	res := scanWith(t, chain.DefaultScanner, sb, simUSDC, src, 2)
-	if res.Orphaned != 1 || res.Revived != 1 || res.New != 0 || res.Confirmed != 1 {
-		t.Fatalf("scan after reorg = %+v, want orphaned, revived and reconfirmed", res)
+	if _, err := pool.Exec(t.Context(), "UPDATE chain_cursors SET next_block = 2 WHERE sandbox_id = $1", sb); err != nil {
+		t.Fatal(err)
+	}
+	res = scanWith(t, chain.DefaultScanner, sb, simUSDC, src, 2)
+	if res.Orphaned != 0 || res.Revived != 1 || res.New != 0 || res.Confirmed != 1 {
+		t.Fatalf("scan after re-inclusion = %+v, want revived and reconfirmed", res)
 	}
 	r := record(t, sb, tr)
 	if r.Status != chain.StatusConfirmed || r.BlockNumber != 3 || r.BlockHash != hash32('b') {

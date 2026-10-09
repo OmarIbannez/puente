@@ -4,9 +4,9 @@
 -- network's feed. (sandbox_id, chain_id, tx_hash, log_index) is unique, so a
 -- rescan inserts nothing. status moves seen -> confirmed once the block has
 -- enough confirmations, and to orphaned when the stored block_hash is no
--- longer canonical. An orphaned transfer whose log reappears in a different
--- block (the transaction was re-included after a reorg) goes back to seen
--- with the new block. Addresses and hashes are lowercase 0x hex.
+-- longer canonical. An orphaned transfer whose log the feed reports again in
+-- a block the canonical chain confirms (the transaction was re-included after
+-- a reorg) goes back to seen with that block. Addresses and hashes are lowercase 0x hex.
 --
 -- chain_cursors stores, per sandbox and network, the next block to scan.
 

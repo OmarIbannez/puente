@@ -80,7 +80,9 @@ func Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Network, src So
 //     hash is marked orphaned, and the cursor rewinds to rescan that block.
 //  2. It pulls the feed from the cursor to the head in windows of at most
 //     MaxRange blocks and inserts each transfer as seen. Rescanning a range
-//     inserts nothing.
+//     inserts nothing. An orphaned transfer that the feed reports again in a
+//     block the canonical chain confirms (re-included after a reorg) goes
+//     back to seen in that block.
 //  3. It marks seen transfers confirmed once head - block + 1 ≥
 //     confirmations (0 is treated as 1).
 //
@@ -139,7 +141,7 @@ func (s Scanner) Scan(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Net
 		res.Windows++
 		res.Fetched += int64(len(logs))
 		for _, t := range logs {
-			if err := upsert(ctx, tx, sandbox, net, token, t, &res); err != nil {
+			if err := upsert(ctx, tx, sandbox, net, src, token, t, &res); err != nil {
 				return res, err
 			}
 		}
@@ -222,10 +224,11 @@ func (s Scanner) checkReorgs(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, 
 	return rewind, nil
 }
 
-// upsert inserts one feed transfer, or revives an orphaned one whose log
-// reappeared in a different block. Anything else already stored is left as
-// it is.
-func upsert(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Network, token string, t Transfer, res *ScanResult) error {
+// upsert inserts one feed transfer. If the transfer is already stored as
+// orphaned and the feed now places it in a block the canonical chain
+// confirms (the transaction was re-included after a reorg), it is revived
+// as seen in that block. Anything else already stored is left as it is.
+func upsert(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Network, src Source, token string, t Transfer, res *ScanResult) error {
 	if err := validateFeed(net, token, &t); err != nil {
 		return err
 	}
@@ -240,30 +243,45 @@ func upsert(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net Network, toke
 	if err != nil {
 		return fmt.Errorf("chain: scan %s: block number: %w", net.Key, err)
 	}
-	var inserted bool
-	err = tx.QueryRow(ctx, `INSERT INTO chain_transfers
+	tag, err := tx.Exec(ctx, `INSERT INTO chain_transfers
 		(sandbox_id, network, chain_id, asset, token, tx_hash, log_index, block_number, block_hash,
 		 from_addr, to_addr, amount_minor)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (sandbox_id, chain_id, tx_hash, log_index) DO UPDATE SET
-			block_number = EXCLUDED.block_number, block_hash = EXCLUDED.block_hash,
-			from_addr = EXCLUDED.from_addr, to_addr = EXCLUDED.to_addr,
-			amount_minor = EXCLUDED.amount_minor, status = 'seen',
-			confirmed_at = NULL, updated_at = now()
-		WHERE chain_transfers.status = 'orphaned' AND chain_transfers.block_hash <> EXCLUDED.block_hash
-		RETURNING xmax = 0`,
+		ON CONFLICT (sandbox_id, chain_id, tx_hash, log_index) DO NOTHING`,
 		sandbox, net.Key, t.ChainID, string(t.Amount.Asset), t.Token, t.TxHash, logIndex, block,
-		t.BlockHash, t.From, t.To, t.Amount.Minor).Scan(&inserted)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil // already stored
-	case err != nil:
+		t.BlockHash, t.From, t.To, t.Amount.Minor)
+	if err != nil {
 		return fmt.Errorf("chain: scan %s: store transfer %s/%d: %w", net.Key, t.TxHash, t.LogIndex, err)
-	case inserted:
-		res.New++
-	default:
-		res.Revived++
 	}
+	if tag.RowsAffected() == 1 {
+		res.New++
+		return nil
+	}
+
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM chain_transfers
+		WHERE sandbox_id = $1 AND chain_id = $2 AND tx_hash = $3 AND log_index = $4`,
+		sandbox, t.ChainID, t.TxHash, logIndex).Scan(&status); err != nil {
+		return fmt.Errorf("chain: scan %s: read transfer %s/%d: %w", net.Key, t.TxHash, t.LogIndex, err)
+	}
+	if status != StatusOrphaned {
+		return nil
+	}
+	hash, ok, err := src.BlockHash(ctx, t.BlockNumber)
+	if err != nil {
+		return fmt.Errorf("chain: scan %s: block hash %d: %w", net.Key, t.BlockNumber, err)
+	}
+	if !ok || hash != t.BlockHash {
+		return nil // the feed still reports a block the chain does not have
+	}
+	if _, err := tx.Exec(ctx, `UPDATE chain_transfers SET
+			block_number = $5, block_hash = $6, from_addr = $7, to_addr = $8, amount_minor = $9,
+			status = 'seen', confirmed_at = NULL, updated_at = now()
+		WHERE sandbox_id = $1 AND chain_id = $2 AND tx_hash = $3 AND log_index = $4`,
+		sandbox, t.ChainID, t.TxHash, logIndex, block, t.BlockHash, t.From, t.To, t.Amount.Minor); err != nil {
+		return fmt.Errorf("chain: scan %s: revive transfer %s/%d: %w", net.Key, t.TxHash, t.LogIndex, err)
+	}
+	res.Revived++
 	return nil
 }
 
