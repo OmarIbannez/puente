@@ -19,7 +19,7 @@ func TestNewClave(t *testing.T) {
 		t.Fatalf("NewClave seq 36 = %q", got)
 	}
 	// Deterministic: a retry derives the same clave.
-	if spei.NewClave("PNTE", day, 12345) != spei.NewClave("PNTE", day, 12345) {
+	if a, b := spei.NewClave("PNTE", day, 12345), spei.NewClave("PNTE", day, 12345); a != b {
 		t.Fatal("NewClave is not deterministic")
 	}
 	if spei.NewClave("PNTE", day, 1) == spei.NewClave("PNTE", day, 2) {
