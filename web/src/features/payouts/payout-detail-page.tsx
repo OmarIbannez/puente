@@ -14,7 +14,7 @@ import { useApi } from '@/hooks/use-api'
 import { useApp } from '@/hooks/app-context'
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key'
 import { useCustomers } from '@/hooks/use-reference'
-import { cancelPayout, getPayout, type PayoutDetail, type RailOrder } from '@/lib/api'
+import { cancelPayout, getPayout, isFinalClientError, type PayoutDetail, type RailOrder } from '@/lib/api'
 import { formatClabe, formatDateTime, plural, shortId } from '@/lib/format'
 import { formatRate } from '@/lib/quote'
 import { CepReceipt } from '@/features/payouts/cep-receipt'
@@ -32,11 +32,12 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 
 function CancelButton({ payout }: { payout: PayoutDetail }) {
   const { bump, toast } = useApp()
-  const [key, rotate] = useIdempotencyKey()
+  const [key, rotate] = useIdempotencyKey(payout.id)
   const cancel = useAction(cancelPayout)
   async function run() {
     const result = await cancel.run(payout.id, key)
     if (!result.ok) {
+      if (isFinalClientError(result.error)) rotate()
       toast({ title: 'Cancel failed', description: result.error.message, tone: 'danger' })
       return
     }

@@ -16,6 +16,7 @@ import {
   toApiError,
   NO_FAULTS,
   type CreatePayoutInput,
+  isFinalClientError,
 } from '@/lib/api'
 
 function mockFetch(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -139,5 +140,15 @@ describe('getLatestRecon', () => {
   it('still rejects other errors', async () => {
     mockFetch(500, { error: { code: 'INTERNAL', message: 'internal server error' } })
     await expect(getLatestRecon()).rejects.toMatchObject({ code: 'INTERNAL' })
+  })
+})
+
+describe('isFinalClientError', () => {
+  it('is true for stored 4xx outcomes and false for 409, 5xx and network errors', () => {
+    expect(isFinalClientError(new ApiError(422, 'INSUFFICIENT_FUNDS', 'x'))).toBe(true)
+    expect(isFinalClientError(new ApiError(404, 'NOT_FOUND', 'x'))).toBe(true)
+    expect(isFinalClientError(new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'x'))).toBe(false)
+    expect(isFinalClientError(new ApiError(503, 'UNAVAILABLE', 'x'))).toBe(false)
+    expect(isFinalClientError(new ApiError(0, 'NETWORK', 'x'))).toBe(false)
   })
 })

@@ -577,3 +577,12 @@ export interface Live {
 }
 
 export const getLive = () => request<Live>('/api/live')
+
+/**
+ * Reports a 4xx the server stored against its Idempotency-Key and will
+ * replay for that key (everything but 409, which means "still running").
+ * After one, the next attempt needs a new key.
+ */
+export function isFinalClientError(error: ApiError): boolean {
+  return error.status >= 400 && error.status < 500 && error.status !== 409
+}

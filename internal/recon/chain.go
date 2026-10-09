@@ -70,24 +70,33 @@ func (m ChainMatcher) Match(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID) (
 	}
 	for _, key := range order {
 		group := groups[key]
-		if len(group) > 1 {
-			breaks = append(breaks, m.duplicateBreak(group))
-			continue
-		}
-		c := group[0]
-		canonical, found, err := src.Lookup(ctx, c.TxHash, c.LogIndex)
-		if err != nil {
-			return nil, 0, fmt.Errorf("lookup %s#%d: %w", c.TxHash, c.LogIndex, err)
+		// Look every credit up: a batch transfer can legitimately emit two
+		// logs to one address for one amount in one transaction. Only a
+		// group with a credit the canonical chain lacks is a duplicate.
+		var phantoms []openCredit
+		for _, c := range group {
+			canonical, found, err := src.Lookup(ctx, c.TxHash, c.LogIndex)
+			if err != nil {
+				return nil, 0, fmt.Errorf("lookup %s#%d: %w", c.TxHash, c.LogIndex, err)
+			}
+			switch {
+			case !found:
+				phantoms = append(phantoms, c)
+			case canonical.Amount.Minor != c.Credited.Minor:
+				breaks = append(breaks, m.creditBreak(c, AmountMismatch,
+					"The canonical chain moved a different amount than the indexer reported and the ledger credited.",
+					canonical.Amount.String(), c.Credited.String()))
+			}
 		}
 		switch {
-		case !found:
-			breaks = append(breaks, m.creditBreak(c, MissingOnChain,
-				"The ledger credits a deposit the canonical chain does not have (reorged out, or never existed).",
-				c.Credited.String(), "no such log"))
-		case canonical.Amount.Minor != c.Credited.Minor:
-			breaks = append(breaks, m.creditBreak(c, AmountMismatch,
-				"The canonical chain moved a different amount than the indexer reported and the ledger credited.",
-				canonical.Amount.String(), c.Credited.String()))
+		case len(phantoms) > 0 && len(phantoms) < len(group):
+			breaks = append(breaks, m.duplicateBreak(group, len(group)-len(phantoms)))
+		default:
+			for _, c := range phantoms {
+				breaks = append(breaks, m.creditBreak(c, MissingOnChain,
+					"The ledger credits a deposit the canonical chain does not have (reorged out, or never existed).",
+					c.Credited.String(), "no such log"))
+			}
 		}
 	}
 
@@ -110,7 +119,9 @@ func (m ChainMatcher) Match(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID) (
 	return breaks, len(credits) + len(missing), nil
 }
 
-func (m ChainMatcher) duplicateBreak(group []openCredit) Break {
+// duplicateBreak reports a group of credits for one logical transfer of
+// which only onChain are on the canonical chain.
+func (m ChainMatcher) duplicateBreak(group []openCredit, onChain int) Break {
 	c := group[0]
 	ids := ""
 	for i, g := range group {
@@ -122,10 +133,12 @@ func (m ChainMatcher) duplicateBreak(group []openCredit) Break {
 	ev := m.evidence(c.TxHash, c.To, c.Credited)
 	ev["transfer_ids"] = ids
 	total := money.New(c.Credited.Asset, c.Credited.Minor*int64(len(group)))
+	expected := money.New(c.Credited.Asset, c.Credited.Minor*int64(onChain))
 	return Break{
 		Kind: Duplicate, Source: SourceChain, SubjectType: "chain_tx", SubjectID: c.TxHash,
-		Summary:  fmt.Sprintf("One on-chain transfer was credited %d times (the indexer reported its log more than once).", len(group)),
-		Expected: c.Credited.String(), Actual: total.String(), Evidence: ev,
+		Summary: fmt.Sprintf("%d on-chain log(s) were credited %d times (the indexer reported a log that isn't on the chain).",
+			onChain, len(group)),
+		Expected: expected.String(), Actual: total.String(), Evidence: ev,
 	}
 }
 
@@ -153,7 +166,7 @@ func (m ChainMatcher) openCredits(ctx context.Context, tx pgx.Tx, sandbox uuid.U
 	rows, err := tx.Query(ctx, `
 		SELECT t.id, c.generation, t.tx_hash, t.log_index, t.to_addr, c.asset, c.amount_minor, c.customer_id
 		FROM deposit_credits c
-		JOIN chain_transfers t ON t.id = c.transfer_id
+		JOIN chain_transfers t ON t.id = c.transfer_id AND t.sandbox_id = c.sandbox_id
 		WHERE c.sandbox_id = $1 AND t.network = $2 AND c.reversal_entry_id IS NULL
 		ORDER BY t.id`, sandbox, m.Network.Key)
 	if err != nil {

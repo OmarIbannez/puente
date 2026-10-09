@@ -12,7 +12,7 @@ import { useAction } from '@/hooks/use-action'
 import { useApp, useSandbox } from '@/hooks/app-context'
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key'
 import { useCustomers } from '@/hooks/use-reference'
-import { createPayout, createPayoutRaw, parseApiError, type CreatePayoutInput, type Payout, type RawResponse } from '@/lib/api'
+import { createPayout, createPayoutRaw, isFinalClientError, parseApiError, type CreatePayoutInput, type Payout, type RawResponse } from '@/lib/api'
 import { formatClabe, shortId } from '@/lib/format'
 import { parseMoney, STABLECOINS, type Stablecoin } from '@/lib/money'
 import { formatBps, formatRate, quotePayout } from '@/lib/quote'
@@ -84,11 +84,11 @@ export function PayoutForm() {
   const [clabe, setClabe] = useState(DEMO_CLABE)
   const [name, setName] = useState('Ana López')
   const [concepto, setConcepto] = useState('Pago proveedor')
-  const [key, rotate] = useIdempotencyKey()
   const create = useAction(createPayout)
   const [twice, setTwice] = useState<{ pending: boolean; exchanges: Exchange[] }>({ pending: false, exchanges: [] })
 
   const selected = customerId === '' ? customers?.[0] : customers?.find((c) => c.id === customerId)
+  const [key, rotate] = useIdempotencyKey(JSON.stringify([selected?.id, asset, amount, clabe, name, concepto]))
   const available = selected?.available[asset]
   const parsed = parseMoney(asset, amount)
   const quote = parsed.ok ? quotePayout(asset, parsed.minor, sandbox.rates[asset], sandbox.fee_bps) : undefined
@@ -109,7 +109,10 @@ export function PayoutForm() {
     if (!body) return
     setTwice({ pending: false, exchanges: [] })
     const result = await create.run(body, key)
-    if (!result.ok) return
+    if (!result.ok) {
+      if (isFinalClientError(result.error)) rotate()
+      return
+    }
     rotate()
     bump()
     toast({

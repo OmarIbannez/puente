@@ -13,7 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// maxRailOrders bounds how many rail orders one run reads (spei's cap).
+// maxRailOrders bounds how many of the newest rail orders one run scans for
+// orders no payout sent (spei's cap); payouts' own orders are read by clave.
 const maxRailOrders = 1000
 
 // RailMatcher compares every payout's ledger entries with the rail's order
@@ -48,13 +49,19 @@ func (m RailMatcher) Match(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID) ([
 	if err != nil {
 		return nil, 0, err
 	}
-	orders, err := m.Rail.Orders(ctx, tx, sandbox, maxRailOrders)
+	claves := make([]string, len(payouts))
+	for i, p := range payouts {
+		claves[i] = p.Clave
+	}
+	// Every payout's order, however many there are, plus the newest orders
+	// to find ones no payout sent.
+	byClave, err := m.Rail.OrdersByClave(ctx, tx, sandbox, claves)
 	if err != nil {
 		return nil, 0, err
 	}
-	byClave := make(map[string]spei.Record, len(orders))
-	for _, o := range orders {
-		byClave[o.Clave] = o
+	recent, err := m.Rail.Orders(ctx, tx, sandbox, maxRailOrders)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	var breaks []Break
@@ -78,7 +85,7 @@ func (m RailMatcher) Match(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID) ([
 		}
 		breaks = append(breaks, stepBreaks(p, o)...)
 	}
-	for _, o := range orders {
+	for _, o := range recent {
 		if known[o.Clave] || o.Status == spei.StatusRechazado {
 			continue
 		}
@@ -89,7 +96,7 @@ func (m RailMatcher) Match(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID) ([
 			Evidence: orderEvidence(&o),
 		})
 	}
-	return breaks, len(payouts) + len(orders), nil
+	return breaks, len(payouts) + len(recent), nil
 }
 
 // stepBreaks compares the payout steps the ledger posted with the order's

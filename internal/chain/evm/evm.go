@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
+	"time"
 
 	"github.com/OmarIbannez/puente/internal/chain"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // Errors returned by the adapter.
@@ -35,13 +38,19 @@ type Client interface {
 }
 
 // Dial connects to the JSON-RPC endpoint at rpcURL.
+//
+// HTTP calls time out after RPCTimeout each, so a hung public RPC can't hold
+// a scan (and the sandbox lock it runs under) indefinitely.
 func Dial(ctx context.Context, rpcURL string) (*ethclient.Client, error) {
-	c, err := ethclient.DialContext(ctx, rpcURL)
+	rc, err := rpc.DialOptions(ctx, rpcURL, rpc.WithHTTPClient(&http.Client{Timeout: RPCTimeout}))
 	if err != nil {
 		return nil, fmt.Errorf("evm: dial: %w", err)
 	}
-	return c, nil
+	return ethclient.NewClient(rc), nil
 }
+
+// RPCTimeout bounds every HTTP call Dial's client makes.
+const RPCTimeout = 15 * time.Second
 
 // Chain is a chain.Source backed by an RPC client for one network.
 type Chain struct {

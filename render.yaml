@@ -1,7 +1,8 @@
 # Render Blueprint: one free web service running the whole image (Go API, web
 # app and worker loop). The database is Neon (Render's single free Postgres
-# slot belongs to Abono): set DATABASE_URL to the Neon connection string in
-# the dashboard when the Blueprint asks for it.
+# slot belongs to Abono): set DATABASE_URL to Neon's *direct* connection
+# string (not the -pooler host: Puente sets per-connection lock and statement
+# timeouts) in the dashboard when the Blueprint asks for it.
 #
 # Create it once: Render dashboard > New > Blueprint, pick this repository.
 # After that, every push to main redeploys once the GitHub Actions checks pass.

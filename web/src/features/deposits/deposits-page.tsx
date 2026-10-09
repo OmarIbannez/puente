@@ -15,7 +15,7 @@ import { useApi } from '@/hooks/use-api'
 import { useApp, useSandbox } from '@/hooks/app-context'
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key'
 import { useCustomers } from '@/hooks/use-reference'
-import { getDeposits, simulateDeposit, type Deposit } from '@/lib/api'
+import { getDeposits, isFinalClientError, simulateDeposit, type Deposit } from '@/lib/api'
 import { shortHash } from '@/lib/format'
 import { parseMoney, STABLECOINS, type Stablecoin } from '@/lib/money'
 import { DepositsTable } from '@/features/deposits/deposits-table'
@@ -28,10 +28,10 @@ function SimulateDepositForm() {
   const [customerId, setCustomerId] = useState('')
   const [asset, setAsset] = useState<Stablecoin>('USDC')
   const [amount, setAmount] = useState('250')
-  const [key, rotate] = useIdempotencyKey()
   const action = useAction(simulateDeposit)
 
   const selected = customerId === '' ? customers?.[0] : customers?.find((c) => c.id === customerId)
+  const [key, rotate] = useIdempotencyKey(JSON.stringify([selected?.id, asset, amount]))
   const parsed = parseMoney(asset, amount)
   const amountError = amount === '' ? undefined : parsed.ok ? (parsed.minor <= 0 ? 'Must be positive' : undefined) : parsed.error
   const canSubmit = selected !== undefined && parsed.ok && parsed.minor > 0 && !action.pending
@@ -40,7 +40,10 @@ function SimulateDepositForm() {
     e.preventDefault()
     if (!selected || !parsed.ok) return
     const result = await action.run({ customer_id: selected.id, asset, amount: parsed.decimal }, key)
-    if (!result.ok) return
+    if (!result.ok) {
+      if (isFinalClientError(result.error)) rotate()
+      return
+    }
     rotate()
     bump()
     toast({

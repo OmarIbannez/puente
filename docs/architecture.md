@@ -111,7 +111,8 @@ ones: identical means the retry is a no-op (`posted=false`), different means `Er
 which is always a bug. Every caller names an entry after its *business event*, not after an
 attempt, so retrying any step is safe by construction.
 
-**Invariants** (asserted after every scenario in `payout`, `recon`, `seed` and `api` tests):
+**Invariants.** The payout tests assert all four after every scenario. The ledger, deposit and seed
+tests assert 1 and 2, and the API test asserts 2 once over HTTP:
 
 1. Every entry sums to zero per asset (`TestUnbalancedRejectedByDatabase`, `TestPerAssetBalance`).
 2. The sandbox trial balance is zero per asset (`TestTrialBalanceZero`, `TestSeed…`).
@@ -127,16 +128,22 @@ The scanner (`chain.Scan`) reads the token's `Transfer` logs to watched addresse
   ranges (Base Sepolia: `-32614`). A per-network cursor makes the scan resumable.
 - **Confirmations.** A transfer is `seen`, then `confirmed` after N blocks (3 on the simulated
   chain, 5 by default live).
-- **Reorgs.** Every scan re-checks the stored block hash of transfers in the last 64 blocks. A
-  mismatch or a missing block marks the transfer `orphaned` and rewinds the cursor. If the
-  transaction is re-included later, the transfer is *revived*: on go-ethereum's simulated
-  backend this happened in 15 of 15 reorgs.
+- **Reorgs.** Every scan re-checks the stored block hash of transfers in the last 64 blocks; a
+  mismatch or a missing block marks the transfer `orphaned`.
+- **Re-reading the reorg window.** Every scan also re-reads the feed for that whole 64-block
+  window, wherever the cursor is. A log a reorg moved into an already-scanned block, or one a
+  lagging RPC reported late, is therefore found on the next scan. An orphaned transaction that
+  is re-included is *revived*; on go-ethereum's simulated backend this happened in 15 of 15
+  reorgs.
+- **Catching up.** One scan makes at most 25 `eth_getLogs` calls, so a long catch-up commits its
+  progress in chunks. Each RPC call has a 15 s HTTP timeout.
 - **Idempotency.** `chain_transfers` is unique on `(sandbox, chain_id, tx_hash, log_index)`, so
   rescans add nothing.
 
 `deposit.Credit` posts `deposit:<transfer>:<generation>` for confirmed transfers to a customer's
-address, and `deposit_reversal:<transfer>:<generation>` when a credited transfer is orphaned. A
-revived transfer gets generation 2. A partial unique index allows at most one open credit per
+address. It posts `deposit_reversal:<transfer>:<generation>` when a credited transfer is
+orphaned, or comes back `seen` (orphaned and revived within one scan, so its block changed under
+the credit). Once the new block is confirmed, the transfer is credited again as generation 2. A partial unique index allows at most one open credit per
 transfer. Candidate rows are locked `FOR UPDATE` and re-read after the lock, so concurrent
 crediters can't double-credit; the test fails if the lock is removed. A reversal may take a
 customer negative. That is deliberate: it is surfaced as a liability to collect, not hidden.
@@ -171,8 +178,21 @@ reserved ─► submitted ─► liquidated ─► returned (devolución)
 - **Rail sync** advances the simulated bank and applies its outcomes to every non-terminal
   payout: settle, reject (release with the fee refunded), and return (compensating entry; no row
   is ever deleted).
-- **Lock order** is always outbox job → sandbox → payout. This avoids deadlocks between the
-  worker, the rail and the sync.
+- **Lock order.**
+  - The worker takes the outbox job, then the sandbox, then the payout. `Rail.Submit` and the
+    rail sync take the sandbox too, so they serialize behind it without deadlocking.
+  - `Create` locks the customer (`FOR NO KEY UPDATE`) and touches the sandbox only through
+    foreign-key share locks.
+  - `SimulateDeposit` locks the sandbox before inserting anything. Taking a key-share lock first
+    and upgrading it deadlocked two concurrent first deposits; `TestConcurrentFirstDeposits`
+    covers this.
+- **Error paths.**
+  - A `lock_timeout` (10 s) and a `statement_timeout` (60 s) on every connection, plus a
+    deadline on every tick, turn any lock wait that slips through into an error rather than a
+    hang.
+  - Non-timeout submission errors (a database error, or a clave conflict that would be a bug)
+    are retried with backoff and do not move the payout to `needs_review`. The last error is
+    recorded on the payout.
 
 ## 7. The simulated SPEI participant
 
@@ -227,7 +247,14 @@ with zero breaks.
   - Every row carries `sandbox_id`. Child tables reference their parent with composite
     `(id, sandbox_id)` foreign keys, so a row can't point into another sandbox.
   - A forged cookie naming the live sandbox is ignored (`TestSandboxCookie`).
-  - Idle sandboxes are pruned after 7 days.
+  - Creating a sandbox seeds a whole world, so it is rate-limited per client IP (a burst of
+    5, then one a minute) and globally (600 an hour). Over the limit the answer is 429. Behind
+    Render the client IP is the last `X-Forwarded-For` hop, which the client can't forge.
+  - The background loop ticks at most the 200 most recently active sandboxes (seen in the last
+    10 minutes) and prunes visitor sandboxes idle for a day.
+  - A sandbox being seeded is hidden from the loop until the seed finishes.
+- **Timeouts.** `/api/sandbox/advance` has a 20 s deadline. A request that runs out of time, or
+  hits a lock or statement timeout, gets 503 `UNAVAILABLE` and can be retried.
 - **Idempotency.** `POST /api/payouts`, `/api/payouts/{id}/cancel` and `/api/deposits/simulate`
   require an `Idempotency-Key`:
   - A replay returns the stored status and body byte for byte, with `Idempotent-Replay: true`.
@@ -265,6 +292,11 @@ only possible from `puente chain send --yes` with an operator key; the API has n
 | Someone pays from the bank portal | `missing_on_ledger` + `balance_mismatch` | `TestManualOrder` |
 | Settlement not yet synced | `missing_on_ledger` until the next sync | `TestSettlementNotYetBooked` |
 | Unbalanced write by any path | Rejected at commit | `TestUnbalancedRejectedByDatabase` |
+| A reorg moves a deposit into an already-scanned block | Found when the reorg window is re-read | `regression` `TestReorgAddsLogBelowCursor` |
+| A batch transfer: two real logs, same recipient and amount | Credited twice, correctly; no break | `TestBatchTransferIsNotADuplicate` |
+| Many parallel ticks of one sandbox | Serialized on the sandbox lock; no pool exhaustion | `TestConcurrentTicksDoNotExhaustPool` |
+| A request floods new sandboxes | 429 after the per-client burst | `api` `TestSandboxCreationRateLimit` |
+| The background loop ticks a sandbox mid-seed | The sandbox is hidden until seeded | `TestSeedSurvivesConcurrentTicker` |
 
 ## 12. Alternatives considered
 
@@ -288,6 +320,17 @@ only possible from `puente chain send --yes` with an operator key; the API has n
     evidence. Repairs belong to explicit, audited operations.
 
 ## 13. Open questions and next steps
+
+- **Idempotency outcomes are stored outside the business transaction.**
+  - If the money effect commits but the connection drops during COMMIT, the handler answers
+    5xx, the key is released, and a retry can create a second payout.
+  - If storing the outcome fails after a good commit, the key answers 409 forever.
+  - The fix is to write the idempotency row in the same transaction as the effect; v1 accepts
+    the window.
+- **Changing the live watch address** leaves earlier deposits to the old address unattributed.
+  Reconciliation reports them as `missing_on_ledger` from then on.
+- **Session limits are startup parameters,** so `DATABASE_URL` must be a direct connection, not a
+  transaction-pooled one (for Neon, the non-`-pooler` host).
 
 - **Scheduled reconciliation runs only while the free Render instance is awake.** In production
   it would be its own scheduled job.

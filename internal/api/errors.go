@@ -122,7 +122,8 @@ func isBusy(err error) bool {
 var validationErrors = []error{
 	payout.ErrInvalidCLABE, payout.ErrUnsupportedAsset, payout.ErrInvalidAmount, payout.ErrInvalidRequest,
 	money.ErrUnknownAsset, money.ErrBadAmount, money.ErrPrecision, money.ErrOverflow,
-	customer.ErrBadAddress, deposit.ErrUnknownNetwork, engine.ErrNoSimNetwork, spei.ErrBadInjection,
+	customer.ErrBadAddress, deposit.ErrUnknownNetwork, engine.ErrNoSimNetwork, engine.ErrSimDepositRange,
+	spei.ErrBadInjection,
 }
 
 func isValidation(err error) bool {

@@ -123,7 +123,9 @@ just smoke     # builds the image, starts the stack, drives the whole story over
 ## Deploy
 
 `render.yaml` deploys one free Render web service from the Docker image. Point `DATABASE_URL` at a
-Neon Postgres. Migrations run on start, and every new visitor gets a freshly seeded sandbox.
+Neon Postgres, using the **direct** connection string, not the `-pooler` host: Puente sets lock and
+statement timeouts per connection. Migrations run on start, and every new visitor gets a freshly
+seeded sandbox. Sandbox creation is rate-limited per IP.
 
 ## Honest limits
 

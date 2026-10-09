@@ -116,7 +116,8 @@ func WatchAddresses(ctx context.Context, q store.Querier, sandbox uuid.UUID, net
 // Credit brings the ledger in line with the sandbox's chain transfers of net:
 // every confirmed transfer to a customer address without an open credit is
 // credited under the next generation, and every orphaned transfer with an
-// open credit is reversed.
+// open credit is reversed, as is one that went back to seen (orphaned and
+// revived within one scan, so its block changed under the credit).
 //
 // Credit is idempotent, and concurrent calls on one sandbox never credit a
 // transfer twice: the transfer rows it acts on stay locked (FOR UPDATE, in
@@ -132,7 +133,7 @@ func Credit(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net chain.Network
 					WHERE c.sandbox_id = t.sandbox_id AND c.transfer_id = t.id AND c.reversal_entry_id IS NULL)
 				AND EXISTS (SELECT 1 FROM deposit_addresses a
 					WHERE a.sandbox_id = t.sandbox_id AND a.network = t.network AND a.address = t.to_addr))
-			OR (t.status = 'orphaned'
+			OR (t.status IN ('orphaned', 'seen')
 				AND EXISTS (SELECT 1 FROM deposit_credits c
 					WHERE c.sandbox_id = t.sandbox_id AND c.transfer_id = t.id AND c.reversal_entry_id IS NULL)))
 		ORDER BY t.id
@@ -219,7 +220,11 @@ func apply(ctx context.Context, tx pgx.Tx, sandbox uuid.UUID, net chain.Network,
 	switch {
 	case s.status == chain.StatusConfirmed && !s.open && s.owner != nil:
 		return actionCredited, credit(ctx, tx, sandbox, net, id, s)
-	case s.status == chain.StatusOrphaned && s.open:
+	case (s.status == chain.StatusOrphaned || s.status == chain.StatusSeen) && s.open:
+		// Only an orphan-and-revive takes a credited transfer back to
+		// seen. Its credit came from a block that is gone, so it is
+		// reversed; once the new block has its confirmations, the
+		// transfer is credited again under the next generation.
 		return actionReversed, reverse(ctx, tx, sandbox, net, id, s)
 	default:
 		return actionNone, nil

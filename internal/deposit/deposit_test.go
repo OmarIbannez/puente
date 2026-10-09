@@ -101,7 +101,12 @@ func (w world) faults(t *testing.T, f store.Faults) {
 // sync scans the simulated chain for every recipient and credits.
 func (w world) sync(t *testing.T) deposit.SyncResult {
 	t.Helper()
-	return w.syncFrom(t, simUSDC, sim.New(pool, w.sb, simUSDC))
+	res, err := deposit.Sync(t.Context(), pool, w.sb, simUSDC,
+		func(tx pgx.Tx) chain.Source { return sim.New(tx, w.sb, simUSDC) }, nil, confs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
 }
 
 func (w world) syncFrom(t *testing.T, net chain.Network, src chain.Source) deposit.SyncResult {
@@ -340,6 +345,45 @@ func TestRevivedTransferCreditedAgain(t *testing.T) {
 
 // A duplicated feed log becomes a second transfer row, and both are
 // credited: the double credit is what reconciliation must catch.
+// A transfer orphaned and revived within one scan comes back as seen in a
+// new block while its credit is still open. The credit is reversed (its
+// block is gone) and the transfer is credited again, as generation 2, once
+// the new block is confirmed.
+func TestCreditOnRevivedSeenTransferIsReversed(t *testing.T) {
+	ctx := t.Context()
+	w := newWorld(t, simUSDC)
+	w.deposit(t, w.address, usdc(4_000_000))
+	w.mine(t, confs)
+	w.sync(t)
+	id := w.transfers(t, simUSDC.Key)[0].ID
+	if _, err := pool.Exec(ctx, `UPDATE chain_transfers SET status = 'seen', block_hash = '0x'||repeat('ab', 32)
+		WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	inTx(t, func(tx pgx.Tx) error {
+		res, err := deposit.Credit(ctx, tx, w.sb, simUSDC)
+		if err == nil && res.Reversed != 1 {
+			t.Errorf("credit on a seen transfer with an open credit = %+v, want 1 reversed", res)
+		}
+		return err
+	})
+	if got := w.balance(t); got != 0 {
+		t.Fatalf("balance after reversal = %d", got)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE chain_transfers SET status = 'confirmed' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	inTx(t, func(tx pgx.Tx) error {
+		_, err := deposit.Credit(ctx, tx, w.sb, simUSDC)
+		return err
+	})
+	want := []string{deposit.CreditRef(id, 1), deposit.ReversalRef(id, 1), deposit.CreditRef(id, 2)}
+	if refs := w.refs(t); !slices.Equal(refs, want) {
+		t.Fatalf("refs = %v, want %v", refs, want)
+	}
+	w.checkTrialBalance(t)
+}
+
 func TestDuplicateLogCreditedTwice(t *testing.T) {
 	w := newWorld(t, simUSDC)
 	w.faults(t, store.Faults{DuplicateLog: true})

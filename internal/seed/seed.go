@@ -144,6 +144,14 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, eng *engine.Engine, sandbox u
 	if sb.Kind != store.KindVisitor {
 		return fmt.Errorf("seed: sandbox %s is %s: %w", sandbox, sb.Kind, engine.ErrLiveReadOnly)
 	}
+	// Hide the sandbox from the background loop while seeding: the loop
+	// ticks only recently seen sandboxes, and a concurrent tick could
+	// consume a fault armed for a specific payout. An hour back is outside
+	// the loop's activity window and far from the idle-prune age.
+	if _, err := pool.Exec(ctx,
+		"UPDATE sandboxes SET last_seen_at = now() - interval '1 hour' WHERE id = $1", sandbox); err != nil {
+		return fmt.Errorf("seed: hide sandbox: %w", err)
+	}
 	s := &seeder{pool: pool, eng: eng, sb: sb}
 	steps := []func(context.Context) error{
 		s.world, s.deposit, s.liquidate, s.returnOne, s.rejectOne, s.cancelOne, s.submitOne, s.reserveOne, s.close,
@@ -152,6 +160,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, eng *engine.Engine, sandbox u
 		if err := step(ctx); err != nil {
 			return err
 		}
+	}
+	if _, err := store.TouchSandbox(ctx, pool, sandbox); err != nil {
+		return fmt.Errorf("seed: unhide sandbox: %w", err)
 	}
 	return nil
 }
@@ -180,12 +191,13 @@ func (s *seeder) deposit(ctx context.Context) error {
 			return fmt.Errorf("seed: deposit %s: %w", d.amount, err)
 		}
 	}
-	credited := 0
-	return s.tickUntil(ctx, "deposits credited", func(rep engine.TickReport) (bool, error) {
-		for _, r := range rep.Deposits {
-			credited += r.Credit.Credited
-		}
-		return credited >= len(deposits), nil
+	// Count credits in the database, not in this seeder's tick reports, so
+	// a credit made by any other tick still counts.
+	return s.tickUntil(ctx, "deposits credited", func(engine.TickReport) (bool, error) {
+		var credited int
+		err := s.pool.QueryRow(ctx, `SELECT count(*) FROM deposit_credits
+			WHERE sandbox_id = $1 AND reversal_entry_id IS NULL`, s.sb.ID).Scan(&credited)
+		return credited >= len(deposits), err
 	})
 }
 

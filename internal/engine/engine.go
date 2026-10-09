@@ -43,6 +43,14 @@ const (
 // ErrNoSimNetwork is returned when an asset has no simulated network.
 var ErrNoSimNetwork = errors.New("engine: no simulated network for asset")
 
+// MaxSimDeposit caps one simulated deposit (1,000,000 units of a 6-decimal
+// stablecoin), so sums over a sandbox's postings can never overflow int64.
+const MaxSimDeposit = 1_000_000_000_000
+
+// ErrSimDepositRange is returned for a simulated deposit outside
+// (0, MaxSimDeposit].
+var ErrSimDepositRange = errors.New("engine: simulated deposit amount out of range")
+
 // ErrLiveReadOnly is returned for a write attempted on the live sandbox.
 var ErrLiveReadOnly = errors.New("engine: the live sandbox is read-only")
 
@@ -234,8 +242,18 @@ func (e *Engine) SimulateDeposit(ctx context.Context, sb store.Sandbox, customer
 	if !ok {
 		return chain.Transfer{}, fmt.Errorf("%w: %s", ErrNoSimNetwork, amount.Asset)
 	}
+	if amount.Minor <= 0 || amount.Minor > MaxSimDeposit {
+		return chain.Transfer{}, fmt.Errorf("%w: at most %s", ErrSimDepositRange, money.New(amount.Asset, MaxSimDeposit).Decimal())
+	}
 	var t chain.Transfer
 	err := store.InTx(ctx, e.cfg.Pool, func(tx pgx.Tx) error {
+		// Lock the sandbox first: inserting the deposit address takes a key
+		// share lock on the sandbox row, and upgrading it later (the
+		// simulated chain locks the sandbox) deadlocks against a concurrent
+		// first deposit of another customer.
+		if _, err := store.LockSandbox(ctx, tx, sb.ID); err != nil {
+			return err
+		}
 		if _, err := customer.Get(ctx, tx, sb.ID, customerID); err != nil {
 			return err
 		}
