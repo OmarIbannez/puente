@@ -335,6 +335,29 @@ func (r Rail) Orders(ctx context.Context, q store.Querier, sandbox uuid.UUID, li
 	return recs, nil
 }
 
+// OrdersByClave returns the sandbox's orders whose clave is in claves, keyed
+// by clave, in one query. Claves with no order are absent from the map.
+func (r Rail) OrdersByClave(ctx context.Context, q store.Querier, sandbox uuid.UUID, claves []string) (map[string]Record, error) {
+	out := make(map[string]Record, len(claves))
+	if len(claves) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx,
+		"SELECT "+orderColumns+" FROM spei_orders WHERE sandbox_id = $1 AND clave = ANY($2)",
+		sandbox, claves)
+	if err != nil {
+		return nil, fmt.Errorf("spei: orders by clave: %w", err)
+	}
+	recs, err := pgx.CollectRows(rows, collectRecord)
+	if err != nil {
+		return nil, fmt.Errorf("spei: orders by clave: %w", err)
+	}
+	for _, rec := range recs {
+		out[rec.Clave] = rec
+	}
+	return out, nil
+}
+
 // StatementBalance returns the settlement account's balance in MXN:
 // funding minus liquidations plus returns.
 func (r Rail) StatementBalance(ctx context.Context, q store.Querier, sandbox uuid.UUID) (money.Amount, error) {
