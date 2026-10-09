@@ -59,7 +59,7 @@ func parseServe(args []string, stderr io.Writer) (serveConfig, error) {
 	if err := parse(fs, args); err != nil {
 		return serveConfig{}, err
 	}
-	c.dbURL = *db
+	c.dbURL = databaseURL(*db)
 	if c.dbURL == "" {
 		return serveConfig{}, fmt.Errorf("%w: --database-url (or %s) is required", errUsage, envDatabaseURL)
 	}

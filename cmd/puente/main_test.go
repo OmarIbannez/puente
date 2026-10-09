@@ -27,7 +27,7 @@ func TestMain(m *testing.M) { os.Exit(testMain(m)) }
 
 func testMain(m *testing.M) int {
 	// Tests never touch a live RPC or a real key.
-	for _, k := range []string{envLiveWatch, envLiveUSDCRPC, envLiveMXNBRPC, envHotWalletKey, envUSDCRate, envPort, envStaticDir} {
+	for _, k := range []string{envDatabaseURL, envLiveWatch, envLiveUSDCRPC, envLiveMXNBRPC, envHotWalletKey, envUSDCRate, envPort, envStaticDir} {
 		_ = os.Unsetenv(k)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

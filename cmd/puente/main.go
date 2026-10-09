@@ -193,13 +193,25 @@ func required(flags ...[2]string) error {
 	return nil
 }
 
-// dbFlag registers --database-url with its environment fallback.
+// dbFlag registers --database-url. Its environment fallback is resolved by
+// databaseURL after parsing, so the URL (and its password) never shows up
+// as a default in -h output.
 func dbFlag(fs *flag.FlagSet) *string {
-	return fs.String("database-url", os.Getenv(envDatabaseURL), "PostgreSQL URL (env "+envDatabaseURL+")")
+	return fs.String("database-url", "", "PostgreSQL URL (default: env "+envDatabaseURL+")")
 }
 
-// openDB connects and applies any pending migration.
+// databaseURL returns the --database-url value, or DATABASE_URL when empty.
+func databaseURL(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv(envDatabaseURL)
+}
+
+// openDB connects to url (or DATABASE_URL) and applies any pending
+// migration.
 func openDB(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	url = databaseURL(url)
 	if url == "" {
 		return nil, fmt.Errorf("%w: --database-url (or %s) is required", errUsage, envDatabaseURL)
 	}

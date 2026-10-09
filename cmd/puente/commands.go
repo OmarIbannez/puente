@@ -252,10 +252,15 @@ func ledgerBalanceCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "ledger of sandbox %s\n\n", sb.ID)
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
-	_, _ = fmt.Fprintln(tw, "ACCOUNT\tNAME\tTYPE\tBALANCE\t")
+	// Text columns align left; balances align right in the last column.
+	width := len("BALANCE")
 	for _, b := range balances {
-		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t\n", int(b.Code), b.Name, b.Type, b.Balance)
+		width = max(width, len(b.Balance.String()))
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(tw, "ACCOUNT\tNAME\tTYPE\t%*s\n", width, "BALANCE")
+	for _, b := range balances {
+		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%*s\n", int(b.Code), b.Name, b.Type, width, b.Balance)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
