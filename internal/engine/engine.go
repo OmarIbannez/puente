@@ -284,7 +284,7 @@ func (e *Engine) EnsureLive(ctx context.Context) (store.Sandbox, error) {
 			owner = c.ID
 		}
 		for _, l := range e.cfg.Live {
-			if _, err := customer.AssignAddress(ctx, tx, sb.ID, owner, l.Network.Key, e.cfg.LiveAddress); err != nil {
+			if _, err := customer.SetAddress(ctx, tx, sb.ID, owner, l.Network.Key, e.cfg.LiveAddress); err != nil {
 				return err
 			}
 		}

@@ -65,3 +65,24 @@ func TestCustomersAndAddresses(t *testing.T) {
 		t.Fatalf("bad address = %v", err)
 	}
 }
+
+func TestSetAddressReplaces(t *testing.T) {
+	ctx := t.Context()
+	sb := storetest.Sandbox(t, pool).ID
+	c, err := customer.Create(ctx, pool, sb, "Treasury")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := "0x00000000000000000000000000000000000000a1"
+	second := "0x00000000000000000000000000000000000000a2"
+	if _, err := customer.SetAddress(ctx, pool, sb, c.ID, "live", first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := customer.SetAddress(ctx, pool, sb, c.ID, "live", second); err != nil {
+		t.Fatalf("changing the address: %v", err)
+	}
+	addrs, err := customer.Addresses(ctx, pool, sb, "live")
+	if err != nil || len(addrs) != 1 || addrs[0].Address != second {
+		t.Fatalf("addresses = %+v, %v", addrs, err)
+	}
+}

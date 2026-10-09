@@ -147,3 +147,19 @@ func Owner(ctx context.Context, q store.Querier, sandbox uuid.UUID, network, add
 	}
 	return id, nil
 }
+
+// SetAddress makes addr the customer's only deposit address on network,
+// replacing a previous one. The live sandbox uses it so that changing the
+// watched address between deploys takes effect instead of conflicting.
+func SetAddress(ctx context.Context, q store.Querier, sandbox, customerID uuid.UUID, network, addr string) (Address, error) {
+	a, err := NormalizeAddress(addr)
+	if err != nil {
+		return Address{}, err
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM deposit_addresses
+		WHERE sandbox_id = $1 AND network = $2 AND customer_id = $3 AND address <> $4`,
+		sandbox, network, customerID, a); err != nil {
+		return Address{}, fmt.Errorf("customer: replace address: %w", err)
+	}
+	return AssignAddress(ctx, q, sandbox, customerID, network, a)
+}
