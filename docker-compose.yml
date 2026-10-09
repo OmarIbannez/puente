@@ -1,0 +1,23 @@
+# Local stack. Postgres is published on 5435 so it runs next to Sentinel (5432),
+# Colibrí (5433) and Abono (5434).
+#
+#   docker compose up -d --wait db    just the database, for `just dev`
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: puente
+      POSTGRES_PASSWORD: puente
+      POSTGRES_DB: puente
+    ports:
+      - "${PUENTE_DB_PORT:-5435}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U puente"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

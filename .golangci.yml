@@ -1,0 +1,25 @@
+# Curated linter set: correctness and safety first, no pure-style churn.
+version: "2"
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - errcheck
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unused
+formatters:
+  enable:
+    - gofumpt
+    - goimports
