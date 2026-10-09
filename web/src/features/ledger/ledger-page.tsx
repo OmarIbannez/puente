@@ -195,7 +195,7 @@ export function LedgerPage({ kind }: { kind: string | undefined }) {
         title="Double-entry, multi-asset"
         description="Every posting carries an asset and every entry balances per asset, checked in Go and again by a deferred trigger at commit. Entry refs are unique, so retries can post freely and nothing is booked twice."
       />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <ChartOfAccounts />
         </div>

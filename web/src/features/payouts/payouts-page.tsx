@@ -60,7 +60,7 @@ export function PayoutsPage() {
         title="SPEI transfers out"
         description="A payout reserves the stablecoin, queues an outbox job in the same transaction, and goes to the bank with a fixed clave de rastreo. Every state change locks the row, checks the edge and posts its entry once."
       />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="min-w-0">
           <CardHeader className="gap-3 pb-1">
             <CardTitle>Payouts</CardTitle>
@@ -82,9 +82,9 @@ export function PayoutsPage() {
                     <TH>Customer</TH>
                     <TH numeric>Amount</TH>
                     <TH numeric>MXN out</TH>
-                    <TH>Beneficiary</TH>
+                    <TH className="hidden 2xl:table-cell">Beneficiary</TH>
                     <TH>Status</TH>
-                    <TH>Created</TH>
+                    <TH className="hidden sm:table-cell">Created</TH>
                   </tr>
                 </THead>
                 <TBody>
@@ -115,7 +115,7 @@ export function PayoutsPage() {
                       <TD numeric className="font-medium">
                         <Amount value={p.mxn} />
                       </TD>
-                      <TD className="max-w-48 truncate text-xs" title={p.beneficiary_name}>
+                      <TD className="hidden max-w-48 truncate text-xs 2xl:table-cell" title={p.beneficiary_name}>
                         {p.beneficiary_name}
                       </TD>
                       <TD>
@@ -126,7 +126,7 @@ export function PayoutsPage() {
                           </span>
                         )}
                       </TD>
-                      <TD className="whitespace-nowrap text-xs text-muted-foreground" title={formatDateTime(p.created_at)}>
+                      <TD className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell" title={formatDateTime(p.created_at)}>
                         {formatAgo(p.created_at)}
                       </TD>
                     </TR>

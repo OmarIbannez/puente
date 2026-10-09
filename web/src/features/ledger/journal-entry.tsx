@@ -55,12 +55,18 @@ export function JournalEntryCard({ entry, className }: { entry: Entry; className
       </header>
       {(entry.memo !== '' || entry.subject) && (
         <p className="flex flex-wrap gap-x-3 px-4 pt-2 text-xs text-muted-foreground">
-          {entry.memo !== '' && <span>{entry.memo}</span>}
+          {entry.memo !== '' && <span className="break-all">{entry.memo}</span>}
           {entry.subject && <SubjectLink subject={entry.subject} />}
         </p>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[34rem] table-fixed text-sm">
+          <colgroup>
+            <col className="w-[42%]" />
+            <col className="w-[22%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+          </colgroup>
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
               <th scope="col" className="px-4 py-1.5 text-left font-medium">
@@ -88,7 +94,7 @@ export function JournalEntryCard({ entry, className }: { entry: Entry; className
                     <span className="font-mono text-xs text-muted-foreground">{p.account}</span>{' '}
                     <span>{account?.name ?? ''}</span>
                   </td>
-                  <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                  <td className="truncate px-3 py-1.5 text-xs text-muted-foreground">
                     {p.party ? (nameOf(p.party) ?? <span className="font-mono">{shortId(p.party)}</span>) : ''}
                   </td>
                   <td className="px-3 py-1.5 text-right">{debit && <Amount value={abs} />}</td>

@@ -28,7 +28,7 @@ export function CepReceipt({ cep }: { cep: Cep }) {
     <div className="relative overflow-hidden rounded-lg border border-border bg-surface-1 p-4">
       <span
         aria-hidden
-        className="pointer-events-none absolute -right-6 top-6 rotate-12 select-none font-mono text-4xl font-bold tracking-widest text-foreground/5"
+        className="pointer-events-none absolute right-4 bottom-10 -rotate-12 select-none font-mono text-4xl font-bold tracking-widest text-foreground/5"
       >
         SIMULADO
       </span>

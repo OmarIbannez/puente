@@ -118,7 +118,7 @@ export function SandboxBar() {
   return (
     <div className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:px-6">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 sm:basis-auto sm:flex-1">
           <Tooltip content="Your own sandbox, kept in a cookie: a simulated chain, a simulated SPEI bank and a ledger. Nobody else sees it.">
             <span tabIndex={0} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="size-2 rounded-full bg-success" aria-hidden />
