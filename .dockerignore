@@ -1,0 +1,8 @@
+.git
+.claude
+.env
+bin
+docs
+issues
+web/node_modules
+web/dist

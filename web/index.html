@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Puente: stablecoin deposits in, SPEI payouts in pesos out. A double-entry ledger that posts every movement exactly once, and a reconciliation job that checks it against the chain and the bank."
+    />
+    <title>Puente · Stablecoin to SPEI payout ledger</title>
+    <script>
+      // Follow the saved theme, else the system one, before first paint.
+      ;(function () {
+        var media = matchMedia('(prefers-color-scheme: dark)')
+        function apply() {
+          var saved = localStorage.getItem('puente:theme')
+          var dark = saved ? saved === 'dark' : media.matches
+          document.documentElement.classList.toggle('dark', dark)
+        }
+        apply()
+        media.addEventListener('change', apply)
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

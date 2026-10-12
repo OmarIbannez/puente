@@ -1,0 +1,206 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Puente design system: a calm operations console. Every color is a bare
+ * HSL triple consumed through the semantic tokens below; components never
+ * reference raw colors. Petrol teal for the product, cool slate neutrals,
+ * a coral accent used sparingly, and status colors (success, warning,
+ * destructive) reserved for state.
+ */
+:root {
+  --background: 210 22% 97.5%;
+  --foreground: 215 32% 12%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 215 32% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 215 32% 12%;
+
+  --primary: 191 74% 28%;
+  --primary-foreground: 190 60% 97%;
+  --secondary: 210 20% 93%;
+  --secondary-foreground: 215 30% 15%;
+  --muted: 210 18% 94%;
+  --muted-foreground: 215 12% 38%;
+  --accent: 11 70% 50%;
+  --accent-foreground: 10 70% 98%;
+
+  --destructive: 356 68% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 64% 27%;
+  --success-foreground: 150 80% 97%;
+  --warning: 34 92% 35%;
+  --warning-foreground: 30 80% 8%;
+  --info: 220 70% 48%;
+
+  --border: 212 18% 87%;
+  --input: 212 14% 78%;
+  --ring: 191 74% 34%;
+
+  --surface-1: 210 25% 98.5%;
+  --surface-2: 210 20% 95.5%;
+  --surface-3: 210 16% 91%;
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: 214 28% 7%;
+  --foreground: 210 20% 93%;
+
+  --card: 214 24% 10%;
+  --card-foreground: 210 20% 93%;
+  --popover: 214 24% 11%;
+  --popover-foreground: 210 20% 93%;
+
+  --primary: 187 62% 52%;
+  --primary-foreground: 192 70% 8%;
+  --secondary: 214 18% 16%;
+  --secondary-foreground: 210 20% 92%;
+  --muted: 214 18% 14%;
+  --muted-foreground: 212 12% 66%;
+  --accent: 12 82% 66%;
+  --accent-foreground: 12 70% 8%;
+
+  --destructive: 356 78% 66%;
+  --destructive-foreground: 356 80% 8%;
+  --success: 150 52% 52%;
+  --success-foreground: 152 80% 6%;
+  --warning: 38 92% 60%;
+  --warning-foreground: 30 80% 8%;
+  --info: 218 85% 70%;
+
+  --border: 214 16% 19%;
+  --input: 214 14% 26%;
+  --ring: 187 62% 52%;
+
+  --surface-1: 214 24% 8.5%;
+  --surface-2: 214 20% 12.5%;
+  --surface-3: 214 18% 16%;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-info: hsl(var(--info));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-surface-1: hsl(var(--surface-1));
+  --color-surface-2: hsl(var(--surface-2));
+  --color-surface-3: hsl(var(--surface-3));
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-card: 0 1px 2px hsl(var(--foreground) / 0.04), 0 6px 18px -12px hsl(var(--foreground) / 0.12);
+  --shadow-glow: 0 0 0 1px hsl(var(--primary) / 0.35), 0 10px 26px -12px hsl(var(--primary) / 0.5);
+  --shadow-lift: 0 2px 4px hsl(var(--foreground) / 0.05), 0 18px 40px -18px hsl(var(--foreground) / 0.25);
+
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-toast-in: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Fine dotted texture for the loading screen. */
+  .bg-dots {
+    background-image: radial-gradient(hsl(var(--primary) / 0.12) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
