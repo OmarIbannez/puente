@@ -1,11 +1,22 @@
-# Render Blueprint: one free web service running the whole image (Go API, web
-# app and worker loop). The database is Neon (Render's single free Postgres
-# slot belongs to Abono): set DATABASE_URL to Neon's *direct* connection
-# string (not the -pooler host: Puente sets per-connection lock and statement
-# timeouts) in the dashboard when the Blueprint asks for it.
+# Render Blueprint: a free Postgres plus one free web service running the
+# whole image (Go API, web app and worker loop). Render creates the database
+# and wires DATABASE_URL to it (internal connection string, no pooler, which
+# Puente needs for its per-connection lock and statement timeouts).
 #
 # Create it once: Render dashboard > New > Blueprint, pick this repository.
 # After that, every push to main redeploys once the GitHub Actions checks pass.
+databases:
+  # Free tier: 1 GB, expires 30 days after creation, and a workspace can have
+  # only one active free Postgres. No ipAllowList entries: only services in
+  # this workspace can connect.
+  - name: puente-postgres
+    plan: free
+    region: oregon
+    postgresMajorVersion: "18"
+    databaseName: puente
+    user: puente
+    ipAllowList: []
+
 services:
   - type: web
     name: puente
@@ -26,7 +37,9 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: puente-postgres
+          property: connectionString
       - key: PUENTE_SEED_DEMO
         value: "true"
       # Rate limits use the client IP Render's proxy appends.
